@@ -60,7 +60,7 @@ const contactSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: {
-      values: ['Crédito', 'Comercial', 'Marketing', 'RH', 'Remodelações', 'Financeiro', 'Jurídico', 'Outro'],
+      values: ['Recrutamento'],
       message: 'Tipo de contato inválido.'
     }
   },
@@ -88,17 +88,11 @@ const contactSchema = new mongoose.Schema({
   departamento: {
     type: String,
     required: true,
-    validate: {
-      validator: async function(v) {
-        try {
-          const department = await mongoose.model('Department').findOne({ name: v });
-          return department !== null;
-        } catch (err) {
-          return false;
-        }
-      },
-      message: 'Departamento inválido ou inexistente.'
+    enum: {
+      values: ['Crédito', 'Comercial', 'Marketing', 'RH', 'Remodelações', 'Financeiro', 'Jurídico', 'Outro'],
+      message: 'Deparamento inválido.'
     }
+    
   },
 
   agencia: {
