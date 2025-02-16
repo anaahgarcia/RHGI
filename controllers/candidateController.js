@@ -4,243 +4,417 @@ const { User } = require('../models/userModel');
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('HRDatabase.db');
 
+// Configuração do multer para upload de documentos
+const upload = multer({
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB
+    },
+    fileFilter(req, file, cb) {
+        if (!file.originalname.match(/\.(pdf|doc|docx)$/)) {
+            return cb(new Error('Por favor, envie apenas arquivos PDF ou Word'));
+        }
+        cb(undefined, true);
+    }
+});
+
 const CandidateController = {
-  // Create new candidate or add user as responsible
-  createCandidate: async (req, res) => {
-    try {
-      const { nome, email, telefone, nif } = req.body;
+    // Criar novo candidato
+    createCandidate: async (req, res) => {
+        console.log("POST: /api/candidates - " + JSON.stringify(req.body));
 
-      // Check if candidate exists
-      const existingCandidate = await Contact.findOne({
-        $or: [
-          { email: email.toLowerCase() },
-          { nif }
-        ]
-      });
+        try {
+            const {
+                nome,
+                email,
+                telefone,
+                nif,
+                tipo_contato,
+                importancia,
+                origem_contato,
+                departamento,
+                agencia
+            } = req.body;
 
-      if (existingCandidate) {
-        // Add current user as responsible if not already
-        if (!existingCandidate.responsaveis.some(resp => 
-          resp.userId.toString() === req.user._id.toString()
-        )) {
-          existingCandidate.responsaveis.push({
-            userId: req.user._id,
-            data_atribuicao: new Date(),
-            status: 'ativo'
-          });
+            // Verificar campos obrigatórios
+            if (!nome || !email || !telefone || !nif) {
+                console.log("Error: Missing required fields");
+                return res.status(400).json({ error: "Todos os campos obrigatórios devem ser preenchidos." });
+            }
 
-          existingCandidate.historico.push({
-            tipo: 'sistema',
-            conteudo: `Novo responsável adicionado: ${req.user.nome}`,
-            data: new Date(),
-            autor: req.user._id
-          });
+            // Verificar se já existe um candidato com mesmo email ou NIF
+            const existingCandidate = await Contact.findOne({
+                $or: [
+                    { email: email.toLowerCase() },
+                    { nif: nif }
+                ]
+            });
 
-          await existingCandidate.save();
+            if (existingCandidate) {
+                // Adicionar o usuário atual como responsável adicional
+                const alreadyResponsible = existingCandidate.responsaveis.some(resp => 
+                    resp.userId.toString() === req.user._id.toString()
+                );
+
+                if (!alreadyResponsible) {
+                    existingCandidate.responsaveis.push({
+                        userId: req.user._id,
+                        data_atribuicao: new Date(),
+                        status: 'ativo'
+                    });
+
+                    existingCandidate.historico.push({
+                        tipo: 'sistema',
+                        conteudo: `Novo responsável adicionado: ${req.user.nome}`,
+                        data: new Date(),
+                        autor: req.user._id
+                    });
+
+                    await existingCandidate.save();
+                    console.log(`Success: User ${req.user.nome} added as responsible for existing candidate ${existingCandidate.nome}`);
+                }
+
+                return res.status(200).json({
+                    message: 'Candidato existente associado ao usuário',
+                    candidate: existingCandidate
+                });
+            }
+
+            // Criar novo candidato
+            const candidate = new Contact({
+                nome,
+                email: email.toLowerCase(),
+                telefone,
+                nif,
+                tipo_contato,
+                importancia,
+                origem_contato,
+                departamento,
+                agencia,
+                status: 'ativo',
+                responsaveis: [{
+                    userId: req.user._id,
+                    data_atribuicao: new Date(),
+                    status: 'ativo'
+                }],
+                historico: [{
+                    tipo: 'sistema',
+                    conteudo: 'Candidato cadastrado no sistema',
+                    data: new Date(),
+                    autor: req.user._id
+                }]
+            });
+
+            const savedCandidate = await candidate.save();
+
+            // Registrar no SQLite
+            const sqliteQuery = `
+                INSERT INTO candidatos (
+                    id,
+                    nome,
+                    email,
+                    telefone,
+                    nif,
+                    status,
+                    responsavel_id,
+                    criado_em,
+                    criado_por
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    savedCandidate._id.toString(),
+                    nome,
+                    email.toLowerCase(),
+                    telefone,
+                    nif,
+                    'ativo',
+                    req.user._id.toString(),
+                    new Date().toISOString(),
+                    req.user._id.toString()
+                ], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+
+            console.log(`Success: Candidate ${nome} created successfully.`);
+            res.status(201).json(savedCandidate);
+        } catch (error) {
+            console.error("Error creating candidate:", error);
+            res.status(500).json({ error: error.message });
         }
+    },
 
-        return res.json({
-          message: 'Candidato existente associado ao usuário',
-          candidate: existingCandidate
-        });
-      }
+    // Buscar todos os candidatos
+    getCandidates: async (req, res) => {
+        console.log("GET: /api/candidates");
+        
+        try {
+            const query = {
+                'responsaveis': {
+                    $elemMatch: {
+                        userId: req.user._id,
+                        status: 'ativo'
+                    }
+                }
+            };
 
-      // Create new candidate
-      const candidate = new Contact({
-        nome,
-        email: email.toLowerCase(),
-        telefone,
-        nif,
-        status: 'ativo',
-        responsaveis: [{
-          userId: req.user._id,
-          data_atribuicao: new Date(),
-          status: 'ativo'
-        }],
-        historico: [{
-          tipo: 'sistema',
-          conteudo: 'Candidato cadastrado no sistema',
-          data: new Date(),
-          autor: req.user._id
-        }]
-      });
+            // Aplicar filtros se fornecidos
+            if (req.query.status) query.status = req.query.status;
+            if (req.query.departamento) query.departamento = req.query.departamento;
+            if (req.query.origem_contato) query.origem_contato = req.query.origem_contato;
 
-      await candidate.save();
+            const candidates = await Contact.find(query)
+                .populate('responsaveis.userId', 'nome email')
+                .sort({ createdAt: -1 });
 
-      // SQLite backup
-      await db.run(
-        'INSERT INTO candidatos (id, nome, email, telefone, nif, status, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [candidate._id.toString(), nome, email, telefone, nif, 'ativo', req.user._id.toString()]
-      );
-
-      res.status(201).json({ candidate });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
-
-  // Get candidates list
-  getCandidates: async (req, res) => {
-    try {
-      const candidates = await Contact.find({
-        'responsaveis': {
-          $elemMatch: {
-            userId: req.user._id,
-            status: 'ativo'
-          }
+            console.log(`Success: Retrieved ${candidates.length} candidates`);
+            res.json(candidates);
+        } catch (error) {
+            console.error("Error fetching candidates:", error);
+            res.status(500).json({ error: error.message });
         }
-      }).populate('responsaveis.userId', 'nome email');
+    },
 
-      res.json({ candidates });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+    // Buscar candidato específico
+    getCandidate: async (req, res) => {
+        const candidateId = req.params.id;
+        console.log(`GET: /api/candidates/${candidateId}`);
 
-  // Get single candidate
-  getCandidate: async (req, res) => {
-    try {
-      const candidate = await Contact.findOne({
-        _id: req.params.id,
-        'responsaveis': {
-          $elemMatch: {
-            userId: req.user._id,
-            status: 'ativo'
-          }
+        try {
+            const candidate = await Contact.findOne({
+                _id: candidateId,
+                'responsaveis': {
+                    $elemMatch: {
+                        userId: req.user._id,
+                        status: 'ativo'
+                    }
+                }
+            }).populate('responsaveis.userId historico.autor', 'nome email');
+
+            if (!candidate) {
+                console.log(`Error: Candidate with ID ${candidateId} not found.`);
+                return res.status(404).json({ error: 'Candidato não encontrado' });
+            }
+
+            console.log(`Success: Retrieved candidate ${candidate.nome}`);
+            res.json(candidate);
+        } catch (error) {
+            console.error("Error fetching candidate:", error);
+            res.status(500).json({ error: error.message });
         }
-      }).populate('responsaveis.userId historico.autor', 'nome email');
+    },
 
-      if (!candidate) {
-        return res.status(404).json({ error: 'Candidato não encontrado' });
-      }
+    // Atualizar candidato
+    updateCandidate: async (req, res) => {
+        const candidateId = req.params.id;
+        console.log(`PUT: /api/candidates/${candidateId} - ${JSON.stringify(req.body)}`);
 
-      res.json({ candidate });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+        try {
+            const candidate = await Contact.findOne({
+                _id: candidateId,
+                'responsaveis': {
+                    $elemMatch: {
+                        userId: req.user._id,
+                        status: 'ativo'
+                    }
+                }
+            });
 
-  // Update candidate
-  updateCandidate: async (req, res) => {
-    try {
-      const candidate = await Contact.findOne({
-        _id: req.params.id,
-        'responsaveis': {
-          $elemMatch: {
-            userId: req.user._id,
-            status: 'ativo'
-          }
+            if (!candidate) {
+                console.log(`Error: Candidate with ID ${candidateId} not found.`);
+                return res.status(404).json({ error: 'Candidato não encontrado' });
+            }
+
+            const updates = req.body;
+            Object.keys(updates).forEach(key => {
+                if (key !== 'responsaveis' && key !== 'historico') {
+                    candidate[key] = updates[key];
+                }
+            });
+
+            candidate.historico.push({
+                tipo: 'atualizacao',
+                conteudo: 'Informações atualizadas',
+                data: new Date(),
+                autor: req.user._id
+            });
+
+            await candidate.save();
+
+            // Atualizar SQLite
+            const sqliteQuery = `
+                UPDATE candidatos 
+                SET nome = ?,
+                    email = ?,
+                    telefone = ?,
+                    status = ?,
+                    atualizado_em = ?,
+                    atualizado_por = ?
+                WHERE id = ?
+            `;
+
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    candidate.nome,
+                    candidate.email,
+                    candidate.telefone,
+                    candidate.status,
+                    new Date().toISOString(),
+                    req.user._id.toString(),
+                    candidateId
+                ], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+
+            console.log(`Success: Candidate ${candidate.nome} updated successfully.`);
+            res.json(candidate);
+        } catch (error) {
+            console.error("Error updating candidate:", error);
+            res.status(500).json({ error: error.message });
         }
-      });
+    },
 
-      if (!candidate) {
-        return res.status(404).json({ error: 'Candidato não encontrado' });
-      }
+    // Adicionar interação
+    addInteraction: async (req, res) => {
+        const candidateId = req.params.id;
+        console.log(`POST: /api/candidates/${candidateId}/interaction - ${JSON.stringify(req.body)}`);
 
-      const updates = req.body;
-      Object.keys(updates).forEach(key => {
-        candidate[key] = updates[key];
-      });
+        try {
+            const { tipo, conteudo } = req.body;
 
-      candidate.historico.push({
-        tipo: 'atualizacao',
-        conteudo: 'Informações atualizadas',
-        data: new Date(),
-        autor: req.user._id
-      });
+            if (!tipo || !conteudo) {
+                console.log("Error: Missing required fields for interaction");
+                return res.status(400).json({ error: "Tipo e conteúdo são obrigatórios" });
+            }
 
-      await candidate.save();
+            const candidate = await Contact.findOne({
+                _id: candidateId,
+                'responsaveis': {
+                    $elemMatch: {
+                        userId: req.user._id,
+                        status: 'ativo'
+                    }
+                }
+            });
 
-      // SQLite backup
-      await db.run(
-        'UPDATE candidatos SET nome = ?, email = ?, telefone = ?, atualizado_em = ? WHERE id = ?',
-        [candidate.nome, candidate.email, candidate.telefone, new Date().toISOString(), candidate._id.toString()]
-      );
+            if (!candidate) {
+                console.log(`Error: Candidate with ID ${candidateId} not found.`);
+                return res.status(404).json({ error: 'Candidato não encontrado' });
+            }
 
-      res.json({ candidate });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+            candidate.historico.push({
+                tipo,
+                conteudo,
+                data: new Date(),
+                autor: req.user._id
+            });
 
-  // Add interaction
-  addInteraction: async (req, res) => {
-    try {
-      const { tipo, conteudo } = req.body;
-      const candidate = await Contact.findOne({
-        _id: req.params.id,
-        'responsaveis': {
-          $elemMatch: {
-            userId: req.user._id,
-            status: 'ativo'
-          }
+            await candidate.save();
+
+            // Registrar no SQLite
+            const sqliteQuery = `
+                INSERT INTO interacoes (
+                    candidato_id,
+                    tipo,
+                    conteudo,
+                    autor_id,
+                    data
+                ) VALUES (?, ?, ?, ?, ?)
+            `;
+
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    candidateId,
+                    tipo,
+                    conteudo,
+                    req.user._id.toString(),
+                    new Date().toISOString()
+                ], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+
+            console.log(`Success: Interaction added to candidate ${candidate.nome}`);
+            res.json({ message: 'Interação registrada com sucesso' });
+        } catch (error) {
+            console.error("Error adding interaction:", error);
+            res.status(500).json({ error: error.message });
         }
-      });
+    },
 
-      if (!candidate) {
-        return res.status(404).json({ error: 'Candidato não encontrado' });
-      }
+    // Inativar candidato
+    inactivateCandidate: async (req, res) => {
+        const candidateId = req.params.id;
+        console.log(`PUT: /api/candidates/${candidateId}/inactivate - ${JSON.stringify(req.body)}`);
 
-      candidate.historico.push({
-        tipo,
-        conteudo,
-        data: new Date(),
-        autor: req.user._id
-      });
+        try {
+            const { motivo } = req.body;
 
-      await candidate.save();
+            if (!motivo) {
+                console.log("Error: Missing reason for inactivation");
+                return res.status(400).json({ error: "Motivo da inativação é obrigatório" });
+            }
 
-      // SQLite backup
-      await db.run(
-        'INSERT INTO interacoes (candidato_id, tipo, conteudo, autor_id, data) VALUES (?, ?, ?, ?, ?)',
-        [candidate._id.toString(), tipo, conteudo, req.user._id.toString(), new Date().toISOString()]
-      );
+            const candidate = await Contact.findOne({
+                _id: candidateId,
+                'responsaveis': {
+                    $elemMatch: {
+                        userId: req.user._id,
+                        status: 'ativo'
+                    }
+                }
+            });
 
-      res.json({ message: 'Interação registrada' });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+            if (!candidate) {
+                console.log(`Error: Candidate with ID ${candidateId} not found.`);
+                return res.status(404).json({ error: 'Candidato não encontrado' });
+            }
 
-  // Inactivate candidate
-  inactivateCandidate: async (req, res) => {
-    try {
-      const { motivo } = req.body;
-      const candidate = await Contact.findOne({
-        _id: req.params.id,
-        'responsaveis': {
-          $elemMatch: {
-            userId: req.user._id,
-            status: 'ativo'
-          }
+            candidate.status = 'inativo';
+            candidate.historico.push({
+                tipo: 'inativacao',
+                conteudo: `Inativado: ${motivo}`,
+                data: new Date(),
+                autor: req.user._id
+            });
+
+            await candidate.save();
+
+            // Atualizar SQLite
+            const sqliteQuery = `
+                UPDATE candidatos 
+                SET status = ?,
+                    inativado_em = ?,
+                    inativado_por = ?,
+                    motivo_inativacao = ?
+                WHERE id = ?
+            `;
+
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    'inativo',
+                    new Date().toISOString(),
+                    req.user._id.toString(),
+                    motivo,
+                    candidateId
+                ], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+
+            console.log(`Success: Candidate ${candidate.nome} inactivated successfully.`);
+            res.json({ message: 'Candidato inativado com sucesso' });
+        } catch (error) {
+            console.error("Error inactivating candidate:", error);
+            res.status(500).json({ error: error.message });
         }
-      });
-
-      if (!candidate) {
-        return res.status(404).json({ error: 'Candidato não encontrado' });
-      }
-
-      candidate.status = 'inativo';
-      candidate.historico.push({
-        tipo: 'inativacao',
-        conteudo: `Inativado: ${motivo}`,
-        data: new Date(),
-        autor: req.user._id
-      });
-
-      await candidate.save();
-
-      // SQLite backup
-      await db.run(
-        'UPDATE candidatos SET status = ?, inativado_em = ?, inativado_por = ? WHERE id = ?',
-        ['inativo', new Date().toISOString(), req.user._id.toString(), candidate._id.toString()]
-      );
-
-      res.json({ message: 'Candidato inativado' });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
     }
-  }
 };
 
 module.exports = CandidateController;
