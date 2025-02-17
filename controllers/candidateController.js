@@ -18,7 +18,6 @@ const upload = multer({
 });
 
 const CandidateController = {
-    // Criar novo candidato
     createCandidate: async (req, res) => {
         console.log("POST: /api/candidates - " + JSON.stringify(req.body));
 
@@ -32,13 +31,15 @@ const CandidateController = {
                 importancia,
                 origem_contato,
                 departamento,
-                agencia
+                agencia,
+                indicacao,
+                nivel_indicacao,
+                responsavel_indicacao
             } = req.body;
 
-            // Verificar campos obrigatórios
-            if (!nome || !email || !telefone || !nif) {
+            if (!nome) {
                 console.log("Error: Missing required fields");
-                return res.status(400).json({ error: "Todos os campos obrigatórios devem ser preenchidos." });
+                return res.status(400).json({ error: "O nome deve ser preenchido." });
             }
 
             // Verificar se já existe um candidato com mesmo email ou NIF
@@ -50,7 +51,6 @@ const CandidateController = {
             });
 
             if (existingCandidate) {
-                // Adicionar o usuário atual como responsável adicional
                 const alreadyResponsible = existingCandidate.responsaveis.some(resp => 
                     resp.userId.toString() === req.user._id.toString()
                 );
@@ -70,7 +70,6 @@ const CandidateController = {
                     });
 
                     await existingCandidate.save();
-                    console.log(`Success: User ${req.user.nome} added as responsible for existing candidate ${existingCandidate.nome}`);
                 }
 
                 return res.status(200).json({
@@ -90,7 +89,11 @@ const CandidateController = {
                 origem_contato,
                 departamento,
                 agencia,
-                status: 'ativo',
+                status: 'identificacao', // Alterado para refletir o pipeline de recrutamento
+                pipeline_status: 'identificacao',
+                indicacao: indicacao || false,
+                nivel_indicacao,
+                responsavel_indicacao,
                 responsaveis: [{
                     userId: req.user._id,
                     data_atribuicao: new Date(),
@@ -101,7 +104,13 @@ const CandidateController = {
                     conteudo: 'Candidato cadastrado no sistema',
                     data: new Date(),
                     autor: req.user._id
-                }]
+                }],
+                metricas: {
+                    data_identificacao: new Date(),
+                    chamadas: [],
+                    agendamentos: [],
+                    entrevistas: []
+                }
             });
 
             const savedCandidate = await candidate.save();
@@ -115,10 +124,14 @@ const CandidateController = {
                     telefone,
                     nif,
                     status,
+                    pipeline_status,
+                    indicacao,
+                    nivel_indicacao,
+                    responsavel_indicacao,
                     responsavel_id,
                     criado_em,
                     criado_por
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             await new Promise((resolve, reject) => {
@@ -128,7 +141,11 @@ const CandidateController = {
                     email.toLowerCase(),
                     telefone,
                     nif,
-                    'ativo',
+                    'identificacao',
+                    'identificacao',
+                    indicacao ? 1 : 0,
+                    nivel_indicacao || null,
+                    responsavel_indicacao || null,
                     req.user._id.toString(),
                     new Date().toISOString(),
                     req.user._id.toString()
@@ -143,6 +160,156 @@ const CandidateController = {
         } catch (error) {
             console.error("Error creating candidate:", error);
             res.status(500).json({ error: error.message });
+        }
+    },
+
+    getCandidates: async (req, res) => {
+        console.log("GET: /api/candidates");
+        
+        try {
+            const query = {
+                'responsaveis': {
+                    $elemMatch: {
+                        userId: req.user._id,
+                        status: 'ativo'
+                    }
+                }
+            };
+
+            // Aplicar filtros avançados
+            if (req.query.status) query.status = req.query.status;
+            if (req.query.pipeline_status) query.pipeline_status = req.query.pipeline_status;
+            if (req.query.departamento) query.departamento = req.query.departamento;
+            if (req.query.origem_contato) query.origem_contato = req.query.origem_contato;
+            if (req.query.localizacao) query.localizacao = req.query.localizacao;
+            if (req.query.skills) query.skills = { $in: req.query.skills.split(',') };
+            if (req.query.experiencia) query.experiencia = req.query.experiencia;
+            if (req.query.cv_analisado !== undefined) query.cv_analisado = req.query.cv_analisado === 'true';
+
+            // Ordenação
+            const sort = {};
+            if (req.query.sort) {
+                const [field, order] = req.query.sort.split(':');
+                sort[field] = order === 'desc' ? -1 : 1;
+            } else {
+                sort.createdAt = -1;
+            }
+
+            const candidates = await Contact.find(query)
+                .populate('responsaveis.userId', 'nome email')
+                .sort(sort);
+
+            console.log(`Success: Retrieved ${candidates.length} candidates`);
+            res.json(candidates);
+        } catch (error) {
+            console.error("Error fetching candidates:", error);
+            res.status(500).json({ error: error.message });
+        }
+    },
+
+    updateCandidateStatus: async (req, res) => {
+        const candidateId = req.params.id;
+        console.log(`PUT: /api/candidates/${candidateId}/status - ${JSON.stringify(req.body)}`);
+
+        try {
+            const { novo_status, observacao } = req.body;
+
+            if (!novo_status) {
+                return res.status(400).json({ error: "Novo status é obrigatório" });
+            }
+
+            const candidate = await Contact.findOne({
+                _id: candidateId,
+                'responsaveis': {
+                    $elemMatch: {
+                        userId: req.user._id,
+                        status: 'ativo'
+                    }
+                }
+            });
+
+            if (!candidate) {
+                return res.status(404).json({ error: 'Candidato não encontrado' });
+            }
+
+            const old_status = candidate.pipeline_status;
+            candidate.pipeline_status = novo_status;
+
+            // Atualizar métricas baseadas no novo status
+            if (!candidate.metricas) {
+                candidate.metricas = {};
+            }
+
+            switch (novo_status) {
+                case 'lead':
+                    candidate.metricas.data_lead = new Date();
+                    break;
+                case 'recrutado':
+                    candidate.metricas.data_recrutamento = new Date();
+                    // Verificar se existe indicação
+                    if (candidate.indicacao && candidate.responsavel_indicacao) {
+                        // Adicionar notificação para o responsável da indicação
+                        await adicionarNotificacaoIndicacao(candidate);
+                    }
+                    break;
+            }
+
+            // Calcular tempo no status anterior
+            if (candidate.metricas[`data_${old_status}`]) {
+                const tempoNoStatus = new Date() - new Date(candidate.metricas[`data_${old_status}`]);
+                candidate.metricas[`tempo_${old_status}`] = tempoNoStatus;
+            }
+
+            candidate.historico.push({
+                tipo: 'mudanca_status',
+                conteudo: `Status alterado de ${old_status} para ${novo_status}${observacao ? ': ' + observacao : ''}`,
+                data: new Date(),
+                autor: req.user._id
+            });
+
+            await candidate.save();
+
+            // Atualizar SQLite
+            const sqliteQuery = `
+                UPDATE candidatos 
+                SET pipeline_status = ?,
+                    atualizado_em = ?,
+                    atualizado_por = ?
+                WHERE id = ?
+            `;
+
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    novo_status,
+                    new Date().toISOString(),
+                    req.user._id.toString(),
+                    candidateId
+                ], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+
+            res.json(candidate);
+        } catch (error) {
+            console.error("Error updating candidate status:", error);
+            res.status(500).json({ error: error.message });
+        }
+    },
+
+    // Função auxiliar para adicionar notificação de indicação
+    async adicionarNotificacaoIndicacao(candidate) {
+        try {
+            // Adicionar notificação para o responsável da indicação
+            await Notification.create({
+                userId: candidate.responsavel_indicacao,
+                tipo: 'indicacao_sucesso',
+                conteudo: `Sua indicação para ${candidate.nome} foi recrutada com sucesso! Você receberá sua recompensa em breve.`,
+                data: new Date(),
+                lida: false
+            });
+        } catch (error) {
+            console.error("Error creating indication notification:", error);
         }
     },
 

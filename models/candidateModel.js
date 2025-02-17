@@ -78,90 +78,13 @@ const contactSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: {
-      values: ['Site da imobiliária', 'LinkedIn', 'Indicação', 
-        'Redes Sociais', 'Site de emprego', 'Olx', 'SapoEmprego', 'Placas', 'Cartões','Telefonou na agência',
-         'Outro'],
+      values: ['Site da imobiliária', 'LinkedIn', 'Indicação', 'Redes Sociais', 'Site de emprego', 
+               'Olx', 'SapoEmprego', 'Placas', 'Cartões', 'Telefonou na agência', 'Outro'],
       message: 'Origem de contato inválida.'
     }
   },
 
-  departamento: {
-    type: String,
-    required: true,
-    enum: {
-      values: ['Crédito', 'Comercial', 'Marketing', 'RH', 'Remodelações', 'Financeiro', 'Jurídico', 'Outro'],
-      message: 'Deparamento inválido.'
-    }
-    
-  },
-
-  agencia: {
-    type: Schema.Types.ObjectId,
-    ref: 'Agency',
-    required: true,
-    validate: {
-      validator: async function(v) {
-        try {
-          const agency = await mongoose.model('Agency').findById(v);
-          return agency !== null;
-        } catch (err) {
-          return false;
-        }
-      },
-      message: 'Agência inválida ou inexistente.'
-    }
-  },
-
-  skills: [{
-    type: String,
-    trim: true,
-    validate: {
-      validator: function(v) {
-        return v.length >= 2;
-      },
-      message: 'Skill deve ter pelo menos 2 caracteres.'
-    }
-  }],
-
-  anos_experiencia: {
-    type: Number,
-    min: [0, 'Anos de experiência não pode ser negativo'],
-    max: [50, 'Anos de experiência não pode exceder 50']
-  },
-
-  especializacao: [{
-    type: String,
-    trim: true,
-    validate: {
-      validator: function(v) {
-        return v.length >= 2;
-      },
-      message: 'Especialização deve ter pelo menos 2 caracteres.'
-    }
-  }],
-
-  cidade: {
-    type: String,
-    trim: true,
-    validate: {
-      validator: function(v) {
-        return !v || v.length >= 2;
-      },
-      message: 'Cidade deve ter pelo menos 2 caracteres.'
-    }
-  },
-
-  distrito: {
-    type: String,
-    trim: true,
-    validate: {
-      validator: function(v) {
-        return !v || v.length >= 2;
-      },
-      message: 'Distrito deve ter pelo menos 2 caracteres.'
-    }
-  },
-
+  // Campos de Pipeline e Status
   status: {
     type: String,
     required: true,
@@ -172,22 +95,133 @@ const contactSchema = new mongoose.Schema({
     default: 'ativo'
   },
 
+  pipeline_status: {
+    type: String,
+    required: true,
+    enum: {
+      values: ['identificacao', 'lead', 'chamada', 'agendamento', 'entrevista', 'recrutado', 'inativo'],
+      message: 'Status do pipeline inválido.'
+    },
+    default: 'identificacao'
+  },
+
+  // Campos de Indicação
+  indicacao: {
+    type: Boolean,
+    default: false
+  },
+
+  nivel_indicacao: {
+    type: String,
+    enum: {
+      values: ['baixa', 'media', 'alta'],
+      message: 'Nível de indicação inválido.'
+    },
+    required: function() {
+      return this.indicacao === true;
+    }
+  },
+
+  responsavel_indicacao: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() {
+      return this.indicacao === true;
+    },
+    validate: {
+      validator: async function(v) {
+        if (!this.indicacao) return true;
+        try {
+          const user = await mongoose.model('User').findById(v);
+          return user !== null;
+        } catch (err) {
+          return false;
+        }
+      },
+      message: 'Responsável pela indicação inválido ou inexistente.'
+    }
+  },
+
+  // Campos de Localização e Experiência
+  departamento: {
+    type: String,
+    required: true,
+    enum: {
+      values: ['Crédito', 'Comercial', 'Marketing', 'RH', 'Remodelações', 'Financeiro', 'Jurídico', 'Outro'],
+      message: 'Departamento inválido.'
+    }
+  },
+
+  agencia: {
+    type: Schema.Types.ObjectId,
+    ref: 'Agency',
+    required: true
+  },
+
+  cidade: {
+    type: String,
+    trim: true
+  },
+
+  distrito: {
+    type: String,
+    trim: true
+  },
+
+  skills: [{
+    type: String,
+    trim: true
+  }],
+
+  experiencia: {
+    type: Number,
+    min: 0,
+    max: 50
+  },
+
+  // Campos de Métricas e Análise
+  metricas: {
+    data_identificacao: Date,
+    data_lead: Date,
+    data_recrutamento: Date,
+    tempo_identificacao: Number,
+    tempo_lead: Number,
+    tempo_chamada: Number,
+    tempo_agendamento: Number,
+    tempo_entrevista: Number,
+    chamadas: [{
+      numero: Number,
+      data: Date,
+      status: String,
+      observacoes: String
+    }],
+    agendamentos: [{
+      numero: Number,
+      data: Date,
+      tipo: String,
+      status: String,
+      observacoes: String
+    }],
+    entrevistas: [{
+      numero: Number,
+      data: Date,
+      tipo: String,
+      status: String,
+      observacoes: String
+    }]
+  },
+
+  cv_analisado: {
+    type: Boolean,
+    default: false
+  },
+
+  // Responsáveis e Histórico
   responsaveis: [{
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
-      validate: {
-        validator: async function(v) {
-          try {
-            const user = await mongoose.model('User').findById(v);
-            return user !== null;
-          } catch (err) {
-            return false;
-          }
-        },
-        message: 'Usuário responsável inválido ou inexistente.'
-      }
+      required: true
     },
     data_atribuicao: {
       type: Date,
@@ -195,10 +229,7 @@ const contactSchema = new mongoose.Schema({
     },
     status: {
       type: String,
-      enum: {
-        values: ['ativo', 'inativo'],
-        message: 'Status do responsável inválido.'
-      },
+      enum: ['ativo', 'inativo'],
       default: 'ativo'
     }
   }],
@@ -207,20 +238,12 @@ const contactSchema = new mongoose.Schema({
     tipo: {
       type: String,
       required: true,
-      enum: {
-        values: ['sistema', 'atualizacao', 'interacao', 'inativacao'],
-        message: 'Tipo de histórico inválido.'
-      }
+      enum: ['sistema', 'atualizacao', 'interacao', 'inativacao', 'mudanca_status'],
+      message: 'Tipo de histórico inválido.'
     },
     conteudo: {
       type: String,
-      required: true,
-      validate: {
-        validator: function(v) {
-          return v.length >= 3;
-        },
-        message: 'Conteúdo do histórico deve ter pelo menos 3 caracteres.'
-      }
+      required: true
     },
     data: {
       type: Date,
@@ -229,34 +252,18 @@ const contactSchema = new mongoose.Schema({
     autor: {
       type: Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
-      validate: {
-        validator: async function(v) {
-          try {
-            const user = await mongoose.model('User').findById(v);
-            return user !== null;
-          } catch (err) {
-            return false;
-          }
-        },
-        message: 'Autor do histórico inválido ou inexistente.'
-      }
+      required: true
     }
   }],
 
+  // Documentos
   documentos: [{
     tipo: {
       type: String,
       required: true,
-      enum: {
-        values: ['cv', 'carta_motivacao', 'outro'],
-        message: 'Tipo de documento inválido.'
-      }
+      enum: ['cv', 'carta_motivacao', 'outro']
     },
-    nome: {
-      type: String,
-      required: true
-    },
+    nome: String,
     data: Buffer,
     mimeType: String,
     uploadadoEm: {
@@ -270,10 +277,7 @@ const contactSchema = new mongoose.Schema({
     }
   }]
 }, {
-  timestamps: {
-    createdAt: 'criadoEm',
-    updatedAt: 'atualizadoEm'
-  }
+  timestamps: true
 });
 
 // Índices
@@ -281,37 +285,70 @@ contactSchema.index({ email: 1 });
 contactSchema.index({ nif: 1 }, { unique: true });
 contactSchema.index({ 'responsaveis.userId': 1, 'responsaveis.status': 1 });
 contactSchema.index({ status: 1 });
+contactSchema.index({ pipeline_status: 1 });
 contactSchema.index({ departamento: 1 });
 contactSchema.index({ agencia: 1 });
 
-// Middleware pre-save para validação adicional
+// Middleware pre-save
 contactSchema.pre('save', async function(next) {
   if (this.isNew) {
-    // Verifica se pelo menos um responsável ativo
+    // Verifica se tem pelo menos um responsável ativo
     const hasActiveResponsible = this.responsaveis.some(resp => resp.status === 'ativo');
     if (!hasActiveResponsible) {
       throw new Error('Candidato deve ter pelo menos um responsável ativo.');
+    }
+
+    // Inicializa métricas
+    if (!this.metricas) {
+      this.metricas = {
+        data_identificacao: new Date()
+      };
     }
   }
   next();
 });
 
-// Método para verificar se um usuário é responsável ativo
-contactSchema.methods.isActiveResponsible = function(userId) {
-  return this.responsaveis.some(resp => 
-    resp.userId.toString() === userId.toString() && resp.status === 'ativo'
-  );
-};
+// Métodos do modelo
+contactSchema.methods = {
+  isActiveResponsible(userId) {
+    return this.responsaveis.some(resp => 
+      resp.userId.toString() === userId.toString() && resp.status === 'ativo'
+    );
+  },
 
-// Método para adicionar interação ao histórico
-contactSchema.methods.addInteraction = async function(tipo, conteudo, autorId) {
-  this.historico.push({
-    tipo,
-    conteudo,
-    data: new Date(),
-    autor: autorId
-  });
-  return this.save();
+  async addInteraction(tipo, conteudo, autorId) {
+    this.historico.push({
+      tipo,
+      conteudo,
+      data: new Date(),
+      autor: autorId
+    });
+    return this.save();
+  },
+
+  async updatePipelineStatus(novoStatus, autorId, observacao) {
+    const oldStatus = this.pipeline_status;
+    this.pipeline_status = novoStatus;
+
+    // Atualiza métricas
+    if (!this.metricas) this.metricas = {};
+    this.metricas[`data_${novoStatus}`] = new Date();
+
+    if (this.metricas[`data_${oldStatus}`]) {
+      const tempoNoStatus = new Date() - new Date(this.metricas[`data_${oldStatus}`]);
+      this.metricas[`tempo_${oldStatus}`] = tempoNoStatus;
+    }
+
+    // Adiciona ao histórico
+    this.historico.push({
+      tipo: 'mudanca_status',
+      conteudo: `Status alterado de ${oldStatus} para ${novoStatus}${observacao ? ': ' + observacao : ''}`,
+      data: new Date(),
+      autor: autorId
+    });
+
+    return this.save();
+  }
 };
 
 const Contact = mongoose.model('Contact', contactSchema);

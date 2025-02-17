@@ -13,9 +13,10 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    name: {
+    nome: {
         type: String,
-        required: true
+        required: true,
+        trim: true
     },
     email: {
         type: String,
@@ -24,7 +25,7 @@ const userSchema = new mongoose.Schema({
         trim: true,
         lowercase: true
     },
-    phone: {
+    telefone: {
         type: String,
         trim: true
     },
@@ -32,57 +33,71 @@ const userSchema = new mongoose.Schema({
     // Role e Status
     role: {
         type: String,
-        enum: ['Admin', 'Manager', 'Director', 'Broker', 'Employee'],
+        enum: [
+            'Admin',
+            'Manager',
+            'Diretor de RH',
+            'Diretor Comercial',
+            'Diretor de Marketing',
+            'Diretor de Crédito',
+            'Diretor de Remodelações',
+            'Diretor Financeiro',
+            'Diretor Jurídico',
+            'Broker de Equipa',
+            'Recrutador',
+            'Consultor',
+            'Employee'
+        ],
         required: true
     },
     status: {
         type: String,
-        enum: ['active', 'inactive'],
-        default: 'active'
+        enum: ['ativo', 'inativo'],
+        default: 'ativo'
     },
 
     // Departamento e Hierarquia
-    department: {
+    departamento: {
         type: String,
         required: function() {
-            return this.role !== 'Admin' && this.role !== 'Manager';
-        }
+            return !['Admin', 'Manager'].includes(this.role);
+        },
+        enum: ['RH', 'Comercial', 'Marketing', 'Crédito', 'Remodelações', 'Financeiro', 'Jurídico']
     },
-    managerId: {
+
+    responsavelId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: function() {
-            return this.role === 'Employee' || this.role === 'Broker';
-        }
+        ref: 'User'
     },
-    brokerTeam: {
+
+    brokerEquipaId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: function() {
-            return this.role === 'Employee' && this.department === 'Commercial';
-        }
+        ref: 'User'
     },
 
     // Agências
-    agencies: [{
-        agencyId: {
+    agencias: [{
+        agenciaId: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'Agency',
-            required: true
-        },
-        assignedDate: {
-            type: Date,
-            default: Date.now
-        },
-        assignedBy: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
-            required: true
+            ref: 'Agency'
         },
         status: {
             type: String,
-            enum: ['active', 'inactive'],
-            default: 'active'
+            enum: ['ativo', 'inativo'],
+            default: 'ativo'
+        },
+        dataAssociacao: {
+            type: Date,
+            default: Date.now
+        },
+        associadoPor: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        dataInativacao: Date,
+        inativadoPor: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
         }
     }],
 
@@ -94,47 +109,55 @@ const userSchema = new mongoose.Schema({
     },
 
     // Campos de auditoria
-    createdAt: {
+    criadoEm: {
         type: Date,
         default: Date.now
     },
-    createdBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-    updatedAt: {
-        type: Date
-    },
-    updatedBy: {
+    criadoPor: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
-    inactivatedAt: {
+    atualizadoEm: {
         type: Date
     },
-    inactivatedBy: {
+    atualizadoPor: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
+    inativadoEm: {
+        type: Date
+    },
+    inativadoPor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    motivoInativacao: String,
 
     // Histórico de alterações
-    changeHistory: [{
-        field: String,
-        oldValue: mongoose.Schema.Types.Mixed,
-        newValue: mongoose.Schema.Types.Mixed,
-        changedAt: {
+    historico: [{
+        tipo: {
+            type: String,
+            enum: ['sistema', 'atualizacao', 'inativacao'],
+            required: true
+        },
+        campo: String,
+        valorAntigo: mongoose.Schema.Types.Mixed,
+        valorNovo: mongoose.Schema.Types.Mixed,
+        data: {
             type: Date,
             default: Date.now
         },
-        changedBy: {
+        autor: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: true
         }
     }]
 }, {
-    timestamps: true
+    timestamps: {
+        createdAt: 'criadoEm',
+        updatedAt: 'atualizadoEm'
+    }
 });
 
 // Middleware para registrar alterações
@@ -142,12 +165,14 @@ userSchema.pre('save', async function(next) {
     if (this.isModified()) {
         const changedFields = this.modifiedPaths();
         changedFields.forEach(field => {
-            if (field !== 'updatedAt' && field !== 'changeHistory') {
-                this.changeHistory.push({
-                    field,
-                    oldValue: this._original ? this._original[field] : undefined,
-                    newValue: this[field],
-                    changedBy: this.updatedBy
+            if (!['criadoEm', 'atualizadoEm', 'historico'].includes(field)) {
+                this.historico.push({
+                    tipo: 'atualizacao',
+                    campo: field,
+                    valorAntigo: this._original ? this._original[field] : undefined,
+                    valorNovo: this[field],
+                    data: new Date(),
+                    autor: this.atualizadoPor
                 });
             }
         });
@@ -155,40 +180,33 @@ userSchema.pre('save', async function(next) {
     next();
 });
 
-// Método para verificar permissões entre usuários
-userSchema.methods.canManage = function(targetUser) {
-    // Admin pode gerenciar qualquer um
-    if (this.role === 'Admin') return true;
-
-    // Manager pode gerenciar todos exceto Admin
-    if (this.role === 'Manager') {
-        return targetUser.role !== 'Admin';
+// Método para verificar permissões
+userSchema.methods.verificarPermissoes = function(targetUser) {
+    if (this.role === 'Admin' || this.role === 'Manager') {
+        return true;
     }
 
-    // Director pode gerenciar apenas sua equipe no mesmo departamento
-    if (this.role === 'Director') {
-        return targetUser.department === this.department && 
-               ['Broker', 'Employee'].includes(targetUser.role);
+    if (this.role.startsWith('Diretor')) {
+        return targetUser.departamento === this.departamento;
     }
 
-    // Broker pode gerenciar apenas sua equipe
-    if (this.role === 'Broker') {
-        return targetUser.brokerTeam && 
-               targetUser.brokerTeam.toString() === this._id.toString() &&
-               targetUser.role === 'Employee';
+    if (this.role === 'Broker de Equipa') {
+        return targetUser.brokerEquipaId && 
+               targetUser.brokerEquipaId.toString() === this._id.toString();
     }
 
-    // Employee não pode gerenciar ninguém
-    return false;
+    return this._id.toString() === targetUser._id.toString();
 };
 
 // Método para verificar acesso à agência
-userSchema.methods.hasAgencyAccess = function(agencyId) {
-    if (this.role === 'Admin' || this.role === 'Manager') return true;
+userSchema.methods.verificarAcessoAgencia = function(agenciaId) {
+    if (this.role === 'Admin' || this.role === 'Manager') {
+        return true;
+    }
     
-    return this.agencies.some(agency => 
-        agency.agencyId.toString() === agencyId.toString() && 
-        agency.status === 'active'
+    return this.agencias.some(agencia => 
+        agencia.agenciaId.toString() === agenciaId.toString() && 
+        agencia.status === 'ativo'
     );
 };
 

@@ -20,9 +20,40 @@ const upload = multer({
     }
 });
 
+// Função para verificar permissões do usuário
+const checkUserPermissions = async (requestingUser, targetUser) => {
+    if (requestingUser.role === 'Admin' || requestingUser.role === 'Manager') {
+        return true;
+    }
+
+    if (requestingUser.role.startsWith('Diretor')) {
+        return targetUser.departamento === requestingUser.departamento;
+    }
+
+    if (requestingUser.role === 'Broker de Equipa') {
+        return targetUser.brokerEquipaId.toString() === requestingUser._id.toString();
+    }
+
+    return requestingUser._id.toString() === targetUser._id.toString();
+};
+
+   // POST: /api/users/register
+    // Body: {
+    //   "username": "string",
+    //   "password": "string",
+    //   "nome": "string",
+    //   "email": "string",
+    //   "role": "string",
+    //   "departamento": "string",
+    //   "agencias": ["string"],
+    //   "responsavelId": "string",
+    //   "brokerEquipaId": "string"
+    // }
+
 const UserController = {
     // Registro de novo usuário
     registerUser: async (req, res) => {
+        console.log("POST: /api/users/register - " + JSON.stringify(req.body));
         try {
             const {
                 username,
@@ -121,8 +152,16 @@ const UserController = {
         }
     },
 
+       // POST: /api/users/login
+    // Body: {
+    //   "username": "string",
+    //   "password": "string"
+    // }
+
+
     // Login
     login: async (req, res) => {
+        console.log("POST: /api/users/login - " + JSON.stringify(req.body));
         try {
             const { username, password } = req.body;
             const user = await User.findOne({ 
@@ -178,8 +217,16 @@ const UserController = {
         }
     },
 
+       // PUT: /api/users/:id/inactivate
+    // Headers: Authorization: Bearer {token}
+    // Body: {
+    //   "motivo": "string"
+    // }
+
     // Inativar usuário
     inativarUsuario: async (req, res) => {
+        const userId = req.params.id;
+        console.log(`PUT: /api/users/${userId}/inactivate - ${JSON.stringify(req.body)}`);
         try {
             const userToInactivate = await User.findById(req.params.id);
             
@@ -242,8 +289,13 @@ const UserController = {
         }
     },
 
+     // GET: /api/users
+    // Headers: Authorization: Bearer {token}
+    // Query Params: departamento, role, agencia, status
+
     // Buscar usuários com base em permissões
     getUsuarios: async (req, res) => {
+        console.log("GET: /api/users - Query:", req.query);
         try {
             let query = { status: 'ativo' };
             let usuarios;
@@ -297,74 +349,115 @@ const UserController = {
         }
     },
 
-    // Atualizar foto do usuário
-    atualizarFoto: async (req, res) => {
+        // GET: /api/users/:id
+    // Headers: Authorization: Bearer {token}
+    getUsuario: async (req, res) => {
+        const userId = req.params.id;
+        console.log(`GET: /api/users/${userId}`);
         try {
-            if (!req.file) {
-                return res.status(400).json({ 
-                    error: 'Nenhuma foto enviada' 
-                });
-            }
+            const user = await User.findById(userId)
+                .populate('agencias.agenciaId')
+                .select('-password -photo');
 
-            const buffer = await sharp(req.file.buffer)
-                .resize({ width: 800, height: 800, fit: 'inside' })
-                .webp({ quality: 80 })
-                .toBuffer();
-
-            const user = await User.findById(req.params.id);
             if (!user) {
-                return res.status(404).json({ 
-                    error: 'Usuário não encontrado' 
-                });
+                console.log(`Error: User with ID ${userId} not found`);
+                return res.status(404).json({ error: 'Usuário não encontrado' });
             }
 
             // Verificar permissões
-            if (req.user.role !== 'Admin' && 
-                req.user.role !== 'Manager' && 
-                req.user._id.toString() !== req.params.id) {
-                return res.status(403).json({ 
-                    error: 'Sem permissão' 
-                });
+            if (!await checkUserPermissions(req.user, user)) {
+                return res.status(403).json({ error: 'Sem permissão para acessar este usuário' });
             }
 
-            user.photo = {
-                data: buffer,
-                contentType: 'image/webp',
-                uploadedAt: new Date()
-            };
-
-            await user.save();
-
-            // Registrar atualização no SQLite
-            const sqliteQuery = `
-                INSERT INTO historico_fotos (
-                    usuario_id, 
-                    atualizado_em, 
-                    atualizado_por
-                ) VALUES (?, ?, ?)
-            `;
-
-            await new Promise((resolve, reject) => {
-                db.run(sqliteQuery, [
-                    user._id.toString(),
-                    new Date().toISOString(),
-                    req.user._id.toString()
-                ], (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            });
-
-            res.json({ message: 'Foto atualizada com sucesso' });
-
+            console.log(`Success: Retrieved user ${user.nome}`);
+            res.json(user);
         } catch (error) {
-            console.error('Erro ao atualizar foto:', error);
+            console.error("Error fetching user:", error);
             res.status(500).json({ error: error.message });
         }
     },
 
+       // PUT: /api/users/:id/photo
+    // Headers: Authorization: Bearer {token}
+    // Body: form-data { photo: File }
+
+    // Atualizar foto do usuário
+    atualizarFoto: [
+        upload.single('photo'), // Adicionar middleware do multer
+        async (req, res) => {
+            const userId = req.params.id;
+            console.log(`PUT: /api/users/${userId}/photo`);
+            try {
+                if (!req.file) {
+                    return res.status(400).json({ 
+                        error: 'Nenhuma foto enviada' 
+                    });
+                }
+
+                const buffer = await sharp(req.file.buffer)
+                    .resize({ width: 800, height: 800, fit: 'inside' })
+                    .webp({ quality: 80 })
+                    .toBuffer();
+
+                const user = await User.findById(req.params.id);
+                if (!user) {
+                    return res.status(404).json({ 
+                        error: 'Usuário não encontrado' 
+                    });
+                }
+
+                // Verificar permissões
+                if (req.user.role !== 'Admin' && 
+                    req.user.role !== 'Manager' && 
+                    req.user._id.toString() !== req.params.id) {
+                    return res.status(403).json({ 
+                        error: 'Sem permissão' 
+                    });
+                }
+
+                user.photo = {
+                    data: buffer,
+                    contentType: 'image/webp',
+                    uploadedAt: new Date()
+                };
+
+                await user.save();
+
+                // Registrar atualização no SQLite
+                const sqliteQuery = `
+                    INSERT INTO historico_fotos (
+                        usuario_id, 
+                        atualizado_em, 
+                        atualizado_por
+                    ) VALUES (?, ?, ?)
+                `;
+
+                await new Promise((resolve, reject) => {
+                    db.run(sqliteQuery, [
+                        user._id.toString(),
+                        new Date().toISOString(),
+                        req.user._id.toString()
+                    ], (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
+
+                res.json({ message: 'Foto atualizada com sucesso' });
+
+            } catch (error) {
+                console.error('Erro ao atualizar foto:', error);
+                res.status(500).json({ error: error.message });
+            }
+        }
+    ],
+
+    // POST: /api/users/logout
+    // Headers: Authorization: Bearer {token}
+
     // Logout
     logout: async (req, res) => {
+        console.log("POST: /api/users/logout");
         try {
             // Registrar logout no SQLite
             const sqliteQuery = `
@@ -392,7 +485,83 @@ const UserController = {
             console.error('Erro ao realizar logout:', error);
             res.status(500).json({ error: error.message });
         }
-    }
+    },
+
+    // PUT: /api/users/:id/update
+    // Headers: Authorization: Bearer {token}
+    // Body: {
+    //   "nome": "string",
+    //   "email": "string",
+    //   "departamento": "string",
+    //   "role": "string" (opcional, somente Admin/Manager)
+    // }
+
+    update: async (req, res) => {
+        const userId = req.params.id;
+        console.log(`PUT: /api/users/${userId} - ${JSON.stringify(req.body)}`);
+        try {
+            const updates = req.body;
+            const user = await User.findById(userId);
+
+            if (!user) {
+                console.log(`Error: User with ID ${userId} not found`);
+                return res.status(404).json({ error: 'Usuário não encontrado' });
+            }
+
+            // Verificar permissões
+            if (!await checkUserPermissions(req.user, user)) {
+                return res.status(403).json({ error: 'Sem permissão para atualizar este usuário' });
+            }
+
+            // Apenas Admin e Manager podem atualizar role
+            if (updates.role && !['Admin', 'Manager'].includes(req.user.role)) {
+                delete updates.role;
+            }
+
+            Object.keys(updates).forEach(key => {
+                if (key !== 'password' && key !== 'photo') {
+                    user[key] = updates[key];
+                }
+            });
+
+            await user.save();
+
+            // Atualizar SQLite
+            const sqliteQuery = `
+                UPDATE usuarios 
+                SET nome = ?,
+                    email = ?,
+                    departamento = ?,
+                    role = ?,
+                    atualizado_em = ?,
+                    atualizado_por = ?
+                WHERE id = ?
+            `;
+
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    user.nome,
+                    user.email,
+                    user.departamento,
+                    user.role,
+                    new Date().toISOString(),
+                    req.user._id.toString(),
+                    userId
+                ], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+
+            console.log(`Success: User ${user.nome} updated successfully`);
+            res.json({ message: 'Usuário atualizado com sucesso', user });
+        } catch (error) {
+            console.error("Error updating user:", error);
+            res.status(500).json({ error: error.message });
+        }
+    },
+
+    
 };
 
-module.exports = userController;
+module.exports = UserController;
