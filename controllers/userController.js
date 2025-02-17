@@ -161,7 +161,7 @@ const UserController = {
 
     // Login
     login: async (req, res) => {
-        console.log("POST: /api/users/login - " + JSON.stringify(req.body));
+        console.log("POST: /api/login - " + JSON.stringify(req.body));
         try {
             const { username, password } = req.body;
             const user = await User.findOne({ 
@@ -564,4 +564,4 @@ const UserController = {
     
 };
 
-module.exports = UserController;
+module.exports = { UserController, upload };
