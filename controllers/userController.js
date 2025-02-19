@@ -181,7 +181,8 @@ const UserController = {
                 agencias,
                 responsavelId,
                 brokerEquipaId,
-                status: 'ativo',
+                status: 'ativo'
+
             });
 
             await user.save();
@@ -823,10 +824,10 @@ const UserController = {
             const historicoAtualizacao = Object.keys(updates).map(campo => ({
                 tipo: "atualizacao",
                 campo: campo,
-                valorAntigo: user[campo] || "N/A",
+                valorAntigo: user[campo] || null,
                 valorNovo: updates[campo],
                 data: new Date(),
-                autor: req.user && req.user._id ? new mongoose.Types.ObjectId(req.user._id) : null
+                autor: req.user && req.user._id || null
             }));
 
 
@@ -838,19 +839,14 @@ const UserController = {
             });
 
 
-            user.historico = user.historico.map(entry => ({
-                ...entry,
-                autor: mongoose.isValidObjectId(entry.autor) 
-                    ? new mongoose.Types.ObjectId(entry.autor) 
-                    : req.user?._id ? new mongoose.Types.ObjectId(req.user._id) : new mongoose.Types.ObjectId("000000000000000000000000")
-            })).concat(historicoAtualizacao.map(entry => ({
-                ...entry,
-                autor: req.user?._id && mongoose.isValidObjectId(req.user._id) 
-                    ? new mongoose.Types.ObjectId(req.user._id) 
-                    : new mongoose.Types.ObjectId("000000000000000000000000")
-            })));
-            
-            
+            // Adicionar novo histórico
+            if (!user.historico) {
+                user.historico = [];
+            }
+
+            user.historico = user.historico.concat(historicoAtualizacao);
+
+
 
             console.log("📜 Histórico corrigido antes de salvar:", JSON.stringify(user.historico, null, 2));
 
@@ -865,8 +861,7 @@ const UserController = {
                     departamento = ?,
                     role = ?,
                     password = ?,
-                    atualizado_em = ?,
-                    atualizado_por = ?
+                    atualizado_em = ?
                 WHERE id = ?
             `;
 
@@ -875,11 +870,10 @@ const UserController = {
                     user.nome,
                     user.email,
                     user.telefone,
-                    user.departamento,
+                    user.departamento || null,
                     user.role,
                     updates.password || user.password, // ✅ Salva senha encriptada no SQLite
                     new Date().toISOString(),
-                    req.user._id.toString(),
                     userId
                 ], (err) => {
                     if (err) reject(err);
