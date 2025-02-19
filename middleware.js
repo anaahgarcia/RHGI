@@ -1,13 +1,20 @@
+require('dotenv').config(); // Carregar as variáveis do .env
 const jwt = require('jsonwebtoken');
 const { User } = require('./models/userModel');
-const { securekey } = require('./secret.key');
-const cors = require('cors');
-require('dotenv').config();
+
+const SECRET_KEY = process.env.JWT_SECRET || "chave_super_secreta_do_jwt";
+
+// 🚨 Se `SECRET_KEY` não estiver definido, o servidor não inicia
+if (!process.env.JWT_SECRET) {
+    console.error("⚠️ SECRET_KEY is not defined in the .env file. Server cannot start.");
+    process.exit(1);
+}
 
 const handleError = (res, status, message) => {
     return res.status(status).json({ error: message });
 };
 
+// ✅ Middleware para verificar o token JWT
 const verifyToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
 
@@ -17,29 +24,36 @@ const verifyToken = (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
-    jwt.verify(token, securekey, (err, decodedUser) => { 
+    jwt.verify(token, SECRET_KEY, (err, decodedUser) => {
         if (err) {
             if (err.name === 'TokenExpiredError') {
                 return handleError(res, 401, 'Token expired');
             }
             return handleError(res, 403, 'Invalid token');
         }
-        
-        decodedUser._id = decodedUser.id;
+
+        console.log("Decoded User:", decodedUser);
+
+        if (!decodedUser.id) {
+            return handleError(res, 403, 'Invalid token structure: missing user ID');
+        }
+
         req.user = decodedUser;
-        console.log(`Token verified. User: ${JSON.stringify(req.user)}`);
         next();
     });
 };
 
+// ✅ Middleware para verificar a role do usuário
 const verifyRole = (roles) => {
     return (req, res, next) => {
-        const userRole = req.user?.role;
-        if (!userRole) {
-            return handleError(res, 403, 'User role is missing from token');
+        console.log("User in verifyRole:", req.user);
+
+        // 🚨 Admin tem acesso irrestrito, então pode passar direto
+        if (req.user.role === "Admin") {
+            return next();
         }
 
-        if (!roles.includes(userRole)) {
+        if (!req.user.role || !roles.includes(req.user.role)) {
             return handleError(res, 403, 'You do not have the necessary permissions');
         }
 
@@ -47,14 +61,15 @@ const verifyRole = (roles) => {
     };
 };
 
+// ✅ Middleware para verificar acesso a uma agência específica
 const verifyAgencyAccess = async (req, res, next) => {
     try {
-        const userId = req.user?.id;
-        const agencyId = req.params.agencyId || req.body.agencyId;
-
-        if (!userId) {
+        if (!req.user || !req.user.id) {
             return handleError(res, 403, 'User ID is missing from token');
         }
+
+        const userId = req.user.id;
+        const agencyId = req.params.agencyId || req.body.agencyId;
 
         const user = await User.findById(userId).populate('agencias');
 
@@ -62,15 +77,14 @@ const verifyAgencyAccess = async (req, res, next) => {
             return handleError(res, 404, 'User not found');
         }
 
-        // Admin e Manager tem acesso total
-        if (['Admin', 'Manager'].includes(user.role)) {
+        // 🚨 Se for Admin, pode acessar qualquer agência
+        if (user.role === "Admin") {
             return next();
         }
 
         // Verificar se usuário tem acesso à agência
         const hasAccess = user.agencias.some(
-            agency => agency._id.toString() === agencyId && 
-            agency.status === 'ativo'
+            agency => agency._id.toString() === agencyId && agency.status === 'ativo'
         );
 
         if (!hasAccess) {

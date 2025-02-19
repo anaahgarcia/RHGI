@@ -1,4 +1,4 @@
-const { CV } = require('../models/cvModel');
+const { CV } = require('../models/cvAnalysisModel');
 const { User } = require('../models/userModel'); // Caso precise verificar departamento, etc.
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('HRDatabase.db');

@@ -6,6 +6,10 @@ const { User } = require('../models/userModel');
 const { Agency } = require('../models/agencyModel');
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('HRdatabase.db');
+const mongoose = require('mongoose');
+
+const securekey = "chave_super_secreta_do_jwt";
+
 
 // Configuração do multer para upload de fotos
 const upload = multer({
@@ -84,20 +88,26 @@ const UserController = {
                 'Employee'
             ];
 
+
             if (!rolesValidas.includes(role)) {
                 return res.status(400).json({ error: 'Função inválida' });
             }
-
-            // Validar permissões para criar usuários
-            if (req.user.role === 'Consultor' || req.user.role === 'Employee') {
-                return res.status(403).json({ error: 'Sem permissão para criar usuários' });
+    
+            // Apenas Admin pode criar Managers e Admins
+            if ((role === 'Manager' || role === 'Admin') && req.user.role !== 'Admin') {
+                return res.status(403).json({ error: 'Apenas Admin pode criar Managers ou Admins' });
             }
-
-            // Se não for Admin ou Manager, não pode criar Admin ou Manager
+    
+            // Outros usuários podem criar qualquer role, exceto Admin e Manager
             if (req.user.role !== 'Admin' && req.user.role !== 'Manager') {
                 if (role === 'Admin' || role === 'Manager') {
                     return res.status(403).json({ error: 'Sem permissão para criar Admin ou Manager' });
                 }
+            }
+    
+            // Se não for Admin ou Manager, garantir que tenha um responsável associado
+            if (req.user.role !== 'Admin' && req.user.role !== 'Manager' && !responsavelId) {
+                return res.status(400).json({ error: 'Usuários precisam de um responsável associado' });
             }
 
             // Criar usuário no MongoDB
@@ -168,26 +178,34 @@ const UserController = {
                 username, 
                 status: 'ativo' 
             });
-
-            if (!user || !(await bcrypt.compare(password, user.password))) {
+    
+            if (!user) {
                 return res.status(401).json({ 
                     error: 'Credenciais inválidas' 
                 });
             }
-
+    
+            // Remover a comparação com bcrypt já que a senha no MongoDB está em plain text
+            if (password !== user.password) {
+                return res.status(401).json({ 
+                    error: 'Credenciais inválidas' 
+                });
+            }
+    
             const token = jwt.sign(
-                { userId: user._id, role: user.role },
-                process.env.JWT_SECRET,
+                { id: user._id.toString(), role: user.role },
+                SECRET_KEY,
                 { expiresIn: '24h' }
             );
-
+            
+    
             // Registrar login no SQLite
             const sqliteQuery = `
                 INSERT INTO logs_acesso (
                     usuario_id, tipo_acao, data_hora, ip
                 ) VALUES (?, ?, ?, ?)
             `;
-
+    
             await new Promise((resolve, reject) => {
                 db.run(sqliteQuery, [
                     user._id.toString(),
@@ -199,7 +217,7 @@ const UserController = {
                     else resolve();
                 });
             });
-
+    
             res.status(200).json({ 
                 token, 
                 user: {
@@ -210,7 +228,7 @@ const UserController = {
                     agencias: user.agencias
                 }
             });
-
+    
         } catch (error) {
             console.error('Erro no login:', error);
             res.status(500).json({ error: error.message });
@@ -376,6 +394,140 @@ const UserController = {
             res.status(500).json({ error: error.message });
         }
     },
+
+// Adicionar logo após a definição do UserController
+createFirstAdmin: async (req, res) => {
+    console.log("POST: /api/users/first-admin - " + JSON.stringify(req.body));
+    
+    const db = new sqlite3.Database('HRdatabase.db');
+    let transaction = false;
+    let user;
+    
+    try {
+        // Verificar se já existe algum admin
+        const adminExists = await new Promise((resolve, reject) => {
+            db.get('SELECT * FROM usuarios WHERE role = ?', ['Admin'], (err, row) => {
+                if (err) reject(err);
+                resolve(row);
+            });
+        });
+
+        if (adminExists) {
+            db.close();
+            return res.status(400).json({ error: 'Já existe um admin no sistema' });
+        }
+
+        const { 
+            username,
+            password,
+            nome,
+            email,
+            telefone
+        } = req.body;
+
+        // Gerar ID que será usado em ambos os bancos
+        const userId = new mongoose.Types.ObjectId().toString();
+        
+        // Criar no MongoDB (campos essenciais apenas)
+        user = new User({
+            _id: userId,
+            username,
+            password, // Senha sem encriptação para o MongoDB
+            nome,
+            email,
+            telefone,
+            role: 'Admin',
+            status: 'ativo'
+        });
+
+        await user.save();
+
+        // Encriptar senha para o SQLite
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Iniciar transação SQLite
+        await new Promise((resolve, reject) => {
+            db.run('BEGIN TRANSACTION', (err) => {
+                if (err) reject(err);
+                resolve();
+            });
+        });
+        transaction = true;
+
+        // Inserir no SQLite (campos essenciais apenas)
+        const sqliteQuery = `
+            INSERT INTO usuarios (
+                id,
+                username,
+                password,
+                nome,
+                email,
+                telefone,
+                role,
+                status,
+                criado_em
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `;
+
+        await new Promise((resolve, reject) => {
+            db.run(sqliteQuery, [
+                userId,
+                username,
+                hashedPassword, // Senha encriptada para o SQLite
+                nome,
+                email,
+                telefone || null,
+                'Admin',
+                'ativo'
+            ], (err) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve();
+                }
+            });
+        });
+
+        await new Promise((resolve, reject) => {
+            db.run('COMMIT', (err) => {
+                if (err) reject(err);
+                resolve();
+            });
+        });
+
+        res.status(201).json({
+            message: 'Primeiro admin criado com sucesso',
+            user: {
+                id: user._id,
+                nome: user.nome,
+                email: user.email,
+                role: user.role
+            }
+        });
+
+    } catch (error) {
+        console.error('Erro ao criar primeiro admin:', error);
+        
+        if (transaction) {
+            await new Promise((resolve) => {
+                db.run('ROLLBACK', () => resolve());
+            });
+        }
+
+        if (user?._id) {
+            try {
+                await User.findByIdAndDelete(user._id);
+            } catch (deleteError) {
+                console.error('Erro ao deletar usuário do MongoDB:', deleteError);
+            }
+        }
+
+        res.status(500).json({ error: error.message });
+    } finally {
+        db.close();
+    }
+},
+
 
        // PUT: /api/users/:id/photo
     // Headers: Authorization: Bearer {token}

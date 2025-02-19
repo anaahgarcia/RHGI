@@ -13,6 +13,10 @@ var AgencyRoutes = require('./routes/agencyRoutes');
 var TaskRoutes = require('./routes/taskRoutes');
 var CandidateRoutes = require('./routes/candidateRoutes');
 var AppointmentRoutes = require('./routes/appointmentRoutes');
+// Adicionar novas rotas
+var CvAnalysisRoutes = require('./routes/cvAnalysisRoutes');
+var DepartmentRoutes = require('./routes/departmentRoutes');
+var ReportRoutes = require('./routes/reportRoutes');
 
 var app = express();
 
@@ -24,7 +28,7 @@ app.use(cors({
 
 // Conexão com MongoDB
 mongoose.set('strictQuery', true);
-mongoose.connect('mongodb+srv://User:Password@cluster.hne45.mongodb.net/')
+mongoose.connect('mongodb+srv://projetogirh:projetogirh@clusterprojetogi.dz6gs.mongodb.net/')
     .then(() => console.log('MongoDB connected successfully'))
     .catch(err => console.error('MongoDB connection error:', err));
 
@@ -53,6 +57,9 @@ app.use('/api/agencies', AgencyRoutes);
 app.use('/api/tasks', TaskRoutes);
 app.use('/api/candidates', CandidateRoutes);
 app.use('/api/appointments', AppointmentRoutes);
+app.use('/api/cvAnalysis', CvAnalysisRoutes);
+app.use('/api/departments', DepartmentRoutes);
+app.use('/api/reports', ReportRoutes);
 
 // Tratamento de erros 404
 app.use(function(req, res, next) {

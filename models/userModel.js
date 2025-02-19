@@ -31,25 +31,63 @@ const userSchema = new mongoose.Schema({
     },
 
     // Role e Status
-    role: {
-        type: String,
-        enum: [
-            'Admin',
-            'Manager',
-            'Diretor de RH',
-            'Diretor Comercial',
-            'Diretor de Marketing',
-            'Diretor de Crédito',
-            'Diretor de Remodelações',
-            'Diretor Financeiro',
-            'Diretor Jurídico',
-            'Broker de Equipa',
-            'Recrutador',
-            'Consultor',
-            'Employee'
-        ],
-        required: true
+// Alterar a parte de Role e Status
+role: {
+    type: String,
+    enum: [
+        'Admin',
+        'Manager',
+        'Diretor de RH',
+        'Diretor Comercial',
+        'Diretor de Marketing',
+        'Diretor de Crédito',
+        'Diretor de Remodelações',
+        'Diretor Financeiro',
+        'Diretor Jurídico',
+        'Broker de Equipa',
+        'Recrutador',
+        'Consultor',
+        'Employee'
+    ],
+    required: true
+},
+
+// Alterar a validação do departamento
+departamento: {
+    type: String,
+    required: function() {
+        // Admin e Manager não precisam de departamento
+        return !['Admin', 'Manager'].includes(this.role);
     },
+    enum: ['RH', 'Comercial', 'Marketing', 'Crédito', 'Remodelações', 'Financeiro', 'Jurídico'],
+    // Adicionar validate para permitir null quando for Admin ou Manager
+    validate: {
+        validator: function(v) {
+            if (['Admin', 'Manager'].includes(this.role)) {
+                return true; // Permite null/undefined para Admin e Manager
+            }
+            return this.departamento != null;
+        },
+        message: 'Departamento é obrigatório exceto para Admin e Manager'
+    }
+},
+
+// Alterar as validações dos campos de hierarquia
+responsavelId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() {
+        return !['Admin', 'Manager'].includes(this.role);
+    }
+},
+
+brokerEquipaId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() {
+        return this.role === 'Consultor';
+    }
+},
     status: {
         type: String,
         enum: ['ativo', 'inativo'],
