@@ -40,27 +40,27 @@ const checkUserPermissions = async (requestingUser, targetUser) => {
     return requestingUser._id.toString() === targetUser._id.toString();
 };
 
-   // POST: /api/users/register
-    // Body: {
-    //   "username": "string",
-    //   "password": "string",
-    //   "nome": "string",
-    //   "email": "string",
-    //   "role": "string",
-    //   "departamento": "string",
-    //   "agencias": ["string"],
-    //   "responsavelId": "string",
-    //   "brokerEquipaId": "string"
-    // }
+// POST: /api/users/register
+// Body: {
+//   "username": "string",
+//   "password": "string",
+//   "nome": "string",
+//   "email": "string",
+//   "role": "string",
+//   "departamento": "string",
+//   "agencias": ["string"],
+//   "responsavelId": "string",
+//   "brokerEquipaId": "string"
+// }
 
 const UserController = {
     // Registro de novo usuário
     registerUser: async (req, res) => {
         console.log("POST: /api/users/register - " + JSON.stringify(req.body));
-        const db = new sqlite3.Database('HRdatabase.db'); 
-        let transaction = false; 
-        let user; 
-    
+        const db = new sqlite3.Database('HRdatabase.db');
+        let transaction = false;
+        let user;
+
         try {
             const {
                 username,
@@ -74,20 +74,20 @@ const UserController = {
                 brokerEquipaId,
                 telefone
             } = req.body;
-    
-            const existingUser = await User.findOne({ 
+
+            const existingUser = await User.findOne({
                 $or: [
                     { username },
                     { email }
                 ]
             });
-    
+
             if (existingUser) {
-                return res.status(400).json({ 
-                    error: 'Username ou email já está em uso' 
+                return res.status(400).json({
+                    error: 'Username ou email já está em uso'
                 });
             }
-    
+
             // Iniciar transação SQLite
             await new Promise((resolve, reject) => {
                 db.run('BEGIN TRANSACTION', (err) => {
@@ -96,7 +96,7 @@ const UserController = {
                 });
             });
             transaction = true;
-    
+
             // Validar roles permitidas
             const rolesValidas = [
                 'Admin',
@@ -113,25 +113,61 @@ const UserController = {
                 'Consultor',
                 'Employee'
             ];
-    
+
             if (!rolesValidas.includes(role)) {
                 return res.status(400).json({ error: 'Função inválida' });
             }
-    
-            // Validar permissões apenas se não for Admin ou Manager
-            if (role !== 'Admin' && role !== 'Manager') {
-                if (!req.user) {
-                    return res.status(403).json({ error: 'Permissão negada' });
-                }
-    
-                if (req.user.role !== 'Admin' && !responsavelId) {
-                    return res.status(400).json({ error: 'Usuários precisam de um responsável associado' });
-                }
+
+            // Validar permissões baseado na role do usuário que está criando
+            if (!req.user) {
+                return res.status(403).json({ error: 'Permissão negada' });
             }
-    
+
+            // Restrições por role do usuário criador
+            switch (req.user.role) {
+                case 'Admin':
+                    // Admin pode criar qualquer tipo de usuário
+                    break;
+                case 'Manager':
+                    // Manager não pode criar Admin
+                    if (role === 'Admin') {
+                        return res.status(403).json({ error: 'Manager não pode criar Admin' });
+                    }
+                    break;
+                case 'Consultor':
+                    // Consultor só pode criar outros Consultores
+                    if (role !== 'Consultor') {
+                        return res.status(403).json({ error: 'Consultor só pode criar outros Consultores' });
+                    }
+                    // Associar automaticamente ao manager, diretor e broker do consultor criador
+                    const consultorCriador = await User.findById(req.user.id).populate('responsavelId');
+                    responsavelId = consultorCriador.responsavelId;
+                    brokerEquipaId = consultorCriador.brokerEquipaId;
+                    break;
+                case 'Employee':
+                case 'Recrutador':
+                    // Não podem criar Admin, Manager ou Diretores
+                    if (['Admin', 'Manager', 'Diretor de RH', 'Diretor Comercial',
+                        'Diretor de Marketing', 'Diretor de Crédito', 'Diretor de Remodelações',
+                        'Diretor Financeiro', 'Diretor Jurídico'].includes(role)) {
+                        return res.status(403).json({ error: 'Sem permissão para criar esta função' });
+                    }
+                    break;
+                default:
+                    // Outros usuários não podem criar Admin ou Manager
+                    if (['Admin', 'Manager'].includes(role)) {
+                        return res.status(403).json({ error: 'Sem permissão para criar Admin ou Manager' });
+                    }
+            }
+
+            // Verificar se precisa de responsável associado
+            if (!['Admin', 'Manager'].includes(role) && !responsavelId) {
+                return res.status(400).json({ error: 'Usuários precisam de um responsável associado' });
+            }
+
             // Criar ID que será usado em ambos os bancos
             const userId = new mongoose.Types.ObjectId();
-    
+
             // Criar no MongoDB primeiro
             user = new User({
                 _id: userId,
@@ -145,14 +181,14 @@ const UserController = {
                 agencias,
                 responsavelId,
                 brokerEquipaId,
-                status: 'ativo'
+                status: 'ativo',
             });
-    
+
             await user.save();
-    
+
             // Encriptar senha para o SQLite
             const hashedPassword = await bcrypt.hash(password, 10);
-    
+
             // Inserir no SQLite
             const sqliteQuery = `
                 INSERT INTO usuarios (
@@ -168,7 +204,7 @@ const UserController = {
                     criado_em
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             `;
-    
+
             await new Promise((resolve, reject) => {
                 db.run(sqliteQuery, [
                     userId.toString(),
@@ -185,7 +221,7 @@ const UserController = {
                     else resolve();
                 });
             });
-    
+
             // Commit da transação
             await new Promise((resolve, reject) => {
                 db.run('COMMIT', (err) => {
@@ -193,9 +229,9 @@ const UserController = {
                     resolve();
                 });
             });
-    
-            res.status(201).json({ 
-                message: 'Usuário criado com sucesso', 
+
+            res.status(201).json({
+                message: 'Usuário criado com sucesso',
                 user: {
                     id: user._id,
                     nome: user.nome,
@@ -203,16 +239,16 @@ const UserController = {
                     role: user.role
                 }
             });
-    
+
         } catch (error) {
             console.error('Erro ao criar usuário:', error);
-            
+
             if (transaction) {
                 await new Promise((resolve) => {
                     db.run('ROLLBACK', () => resolve());
                 });
             }
-    
+
             if (user?._id) {
                 try {
                     await User.findByIdAndDelete(user._id);
@@ -220,14 +256,14 @@ const UserController = {
                     console.error('Erro ao deletar usuário do MongoDB:', deleteError);
                 }
             }
-    
+
             res.status(500).json({ error: error.message });
         } finally {
             db.close();
         }
     },
 
-       // POST: /api/users/login
+    // POST: /api/users/login
     // Body: {
     //   "username": "string",
     //   "password": "string"
@@ -239,38 +275,38 @@ const UserController = {
         console.log("POST: /api/login - " + JSON.stringify(req.body));
         try {
             const { username, password } = req.body;
-            const user = await User.findOne({ 
-                username, 
-                status: 'ativo' 
+            const user = await User.findOne({
+                username,
+                status: 'ativo'
             });
-    
+
             if (!user) {
-                return res.status(401).json({ 
-                    error: 'Credenciais inválidas' 
+                return res.status(401).json({
+                    error: 'Credenciais inválidas'
                 });
             }
-    
+
             // Remover a comparação com bcrypt já que a senha no MongoDB está em plain text
             if (password !== user.password) {
-                return res.status(401).json({ 
-                    error: 'Credenciais inválidas' 
+                return res.status(401).json({
+                    error: 'Credenciais inválidas'
                 });
             }
-    
+
             const token = jwt.sign(
                 { id: user._id, role: user.role },
                 SECRET_KEY,
                 { expiresIn: '24h' }
             );
-            
-    
+
+
             // Registrar login no SQLite
             const sqliteQuery = `
                 INSERT INTO logs_acesso (
                     usuario_id, tipo_acao, data_hora, ip
                 ) VALUES (?, ?, ?, ?)
             `;
-    
+
             await new Promise((resolve, reject) => {
                 db.run(sqliteQuery, [
                     user._id.toString(),
@@ -282,9 +318,9 @@ const UserController = {
                     else resolve();
                 });
             });
-    
-            res.status(200).json({ 
-                token, 
+
+            res.status(200).json({
+                token,
                 user: {
                     id: user._id,
                     nome: user.nome,
@@ -293,14 +329,14 @@ const UserController = {
                     agencias: user.agencias
                 }
             });
-    
+
         } catch (error) {
             console.error('Erro no login:', error);
             res.status(500).json({ error: error.message });
         }
     },
 
-       // PUT: /api/users/:id/inactivate
+    // PUT: /api/users/:id/inactivate
     // Headers: Authorization: Bearer {token}
     // Body: {
     //   "motivo": "string"
@@ -312,26 +348,26 @@ const UserController = {
         console.log(`PUT: /api/users/${userId}/inactivate - ${JSON.stringify(req.body)}`);
         try {
             const userToInactivate = await User.findById(req.params.id);
-            
+
             if (!userToInactivate) {
-                return res.status(404).json({ 
-                    error: 'Usuário não encontrado' 
+                return res.status(404).json({
+                    error: 'Usuário não encontrado'
                 });
             }
 
             // Verificar permissões
             if (req.user.role !== 'Admin') {
                 if (req.user.role === 'Manager' && userToInactivate.role === 'Admin') {
-                    return res.status(403).json({ 
-                        error: 'Managers não podem inativar Admins' 
+                    return res.status(403).json({
+                        error: 'Managers não podem inativar Admins'
                     });
                 }
 
                 if (req.user.role.startsWith('Diretor')) {
-                    if (['Admin', 'Manager'].includes(userToInactivate.role) || 
+                    if (['Admin', 'Manager'].includes(userToInactivate.role) ||
                         userToInactivate.departamento !== req.user.departamento) {
-                        return res.status(403).json({ 
-                            error: 'Sem permissão para inativar este usuário' 
+                        return res.status(403).json({
+                            error: 'Sem permissão para inativar este usuário'
                         });
                     }
                 }
@@ -372,57 +408,66 @@ const UserController = {
         }
     },
 
-     // GET: /api/users
+    // GET: /api/users
     // Headers: Authorization: Bearer {token}
     // Query Params: departamento, role, agencia, status
 
-    // Buscar usuários com base em permissões
     getUsuarios: async (req, res) => {
         console.log("GET: /api/users - Query:", req.query);
+        console.log(`Usuário autenticado: ${req.user.role} (ID: ${req.user._id})`);
+
         try {
             let query = { status: 'ativo' };
-            let usuarios;
 
-            // Filtrar com base na role
-            switch(req.user.role) {
-                case 'Admin':
-                case 'Manager':
-                    // Podem ver todos os usuários
-                    break;
-
-                case 'Diretor de RH':
-                case 'Diretor Comercial':
-                case 'Diretor de Marketing':
-                case 'Diretor de Crédito':
-                case 'Diretor de Remodelações':
-                case 'Diretor Financeiro':
-                case 'Diretor Jurídico':
-                    // Podem ver apenas usuários do seu departamento
-                    query.departamento = req.user.departamento;
-                    break;
-
-                case 'Broker de Equipa':
-                    // Podem ver sua equipe
-                    query.brokerEquipaId = req.user._id;
-                    break;
-
-                case 'Recrutador':
-                case 'Employee':
-                    // Podem ver apenas próprios dados
-                    query._id = req.user._id;
-                    break;
-
-                case 'Consultor':
-                    // Acesso limitado
-                    return res.status(403).json({ 
-                        error: 'Sem permissão para acessar lista de usuários' 
-                    });
+            // ❌ Nenhum usuário pode ver Admins, exceto o próprio Admin
+            if (req.user.role !== 'Admin') {
+                query.role = { $ne: 'Admin' };
             }
 
-            usuarios = await User.find(query)
-                .populate('agencias.agenciaId')
-                .populate('responsavelId')
-                .select('-password -photo');
+            let usuarios;
+
+            if (req.user.role === 'Admin') {
+                console.log("Admin - Acesso total.");
+                // 🔹 Admin vê tudo (exceto senhas)
+                usuarios = await User.find(query)
+                    .populate('agencias.agenciaId')
+                    .populate('responsavelId')
+                    .select('-password');
+            } else if (req.user.role === 'Manager') {
+                console.log("Manager - Pode ver tudo, exceto Admins.");
+                // 🔹 Manager vê tudo, menos Admins
+                usuarios = await User.find(query)
+                    .populate('agencias.agenciaId')
+                    .populate('responsavelId')
+                    .select('-password');
+            } else if (req.user.role.startsWith('Diretor')) {
+                console.log("Diretor - Pode ver tudo dos subordinados diretos, o resto apenas nome, telefone e email.");
+
+                // 🔹 Primeiro, obter todos os usuários subordinados diretamente ao diretor
+                const subordinados = await User.find({ responsavelId: req.user._id }).select('_id');
+
+                // Criar um array com os IDs dos subordinados diretos
+                const subordinadoIds = subordinados.map(user => user._id.toString());
+
+                // 🔹 Verificação: Se o usuário for subordinado, retorna todos os dados; caso contrário, retorna informações básicas
+                usuarios = await User.find(query)
+                    .populate('agencias.agenciaId')
+                    .populate('responsavelId')
+                    .select(subordinadoIds.includes(req.user._id.toString()) ? '-password' : 'nome email telefone photo role');
+            } else if (req.user.role === 'Broker de Equipa') {
+                console.log("Broker de Equipa - Pode ver usuários da sua equipe.");
+                // 🔹 Broker de Equipa pode ver todos os dados de usuários que tenham o mesmo brokerEquipaId
+                query.brokerEquipaId = req.user._id;
+                usuarios = await User.find(query)
+                    .populate('agencias.agenciaId')
+                    .populate('responsavelId')
+                    .select('-password');
+            } else {
+                console.log("Funcionário comum - Pode listar usuários, mas verá apenas nome, email e telefone.");
+                // 🔹 Funcionários comuns podem ver apenas nome, email e telefone
+                usuarios = await User.find(query)
+                    .select('nome email telefone photo');
+            }
 
             res.json(usuarios);
 
@@ -432,7 +477,8 @@ const UserController = {
         }
     },
 
-        // GET: /api/users/:id
+
+    // GET: /api/users/:id
     // Headers: Authorization: Bearer {token}
     getUsuario: async (req, res) => {
         const userId = req.params.id;
@@ -447,9 +493,19 @@ const UserController = {
                 return res.status(404).json({ error: 'Usuário não encontrado' });
             }
 
-            // Verificar permissões
-            if (!await checkUserPermissions(req.user, user)) {
-                return res.status(403).json({ error: 'Sem permissão para acessar este usuário' });
+            // Determinar nível de acesso
+            if (['Admin', 'Manager'].includes(req.user.role) ||
+                req.user.role.startsWith('Diretor') ||
+                req.user.role === 'Broker de Equipa') {
+                // Usuários com permissão especial veem tudo
+                user = await User.findById(userId)
+                    .populate('agencias.agenciaId')
+                    .populate('responsavelId')
+                    .select('-password -photo');
+            } else {
+                // Outros usuários veem apenas informações básicas
+                user = await User.findById(userId)
+                    .select('nome email telefone');
             }
 
             console.log(`Success: Retrieved user ${user.nome}`);
@@ -460,67 +516,67 @@ const UserController = {
         }
     },
 
-// Adicionar logo após a definição do UserController
-createFirstAdmin: async (req, res) => {
-    console.log("POST: /api/users/first-admin - " + JSON.stringify(req.body));
-    
-    const db = new sqlite3.Database('HRdatabase.db');
-    let transaction = false;
-    let user;
-    
-    try {
-        // Verificar se já existe algum admin
-        const adminExists = await new Promise((resolve, reject) => {
-            db.get('SELECT * FROM usuarios WHERE role = ?', ['Admin'], (err, row) => {
-                if (err) reject(err);
-                resolve(row);
+    // Adicionar logo após a definição do UserController
+    createFirstAdmin: async (req, res) => {
+        console.log("POST: /api/users/first-admin - " + JSON.stringify(req.body));
+
+        const db = new sqlite3.Database('HRdatabase.db');
+        let transaction = false;
+        let user;
+
+        try {
+            // Verificar se já existe algum admin
+            const adminExists = await new Promise((resolve, reject) => {
+                db.get('SELECT * FROM usuarios WHERE role = ?', ['Admin'], (err, row) => {
+                    if (err) reject(err);
+                    resolve(row);
+                });
             });
-        });
 
-        if (adminExists) {
-            db.close();
-            return res.status(400).json({ error: 'Já existe um admin no sistema' });
-        }
+            if (adminExists) {
+                db.close();
+                return res.status(400).json({ error: 'Já existe um admin no sistema' });
+            }
 
-        const { 
-            username,
-            password,
-            nome,
-            email,
-            telefone
-        } = req.body;
+            const {
+                username,
+                password,
+                nome,
+                email,
+                telefone
+            } = req.body;
 
-        // Gerar ID que será usado em ambos os bancos
-        const userId = new mongoose.Types.ObjectId().toString();
-        
-        // Criar no MongoDB (campos essenciais apenas)
-        user = new User({
-            _id: userId,
-            username,
-            password, // Senha em plain text para MongoDB
-            nome,
-            email,
-            telefone,
-            role: 'Admin', // ✅ Valor fixo para Admin
-            status: 'ativo'
-        });
+            // Gerar ID que será usado em ambos os bancos
+            const userId = new mongoose.Types.ObjectId().toString();
 
-        await user.save();
-
-        // Encriptar senha para o SQLite
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // Iniciar transação SQLite
-        await new Promise((resolve, reject) => {
-            db.run('BEGIN TRANSACTION', (err) => {
-                if (err) reject(err);
-                resolve();
+            // Criar no MongoDB (campos essenciais apenas)
+            user = new User({
+                _id: userId,
+                username,
+                password, // Senha em plain text para MongoDB
+                nome,
+                email,
+                telefone,
+                role: 'Admin', // ✅ Valor fixo para Admin
+                status: 'ativo'
             });
-        });
-        transaction = true;
 
-        // Inserir no SQLite (campos essenciais apenas)
-        const sqliteQuery = `
+            await user.save();
+
+            // Encriptar senha para o SQLite
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            // Iniciar transação SQLite
+            await new Promise((resolve, reject) => {
+                db.run('BEGIN TRANSACTION', (err) => {
+                    if (err) reject(err);
+                    resolve();
+                });
+            });
+            transaction = true;
+
+            // Inserir no SQLite (campos essenciais apenas)
+            const sqliteQuery = `
             INSERT INTO usuarios (
                 id,
                 username,
@@ -534,67 +590,67 @@ createFirstAdmin: async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         `;
 
-        await new Promise((resolve, reject) => {
-            db.run(sqliteQuery, [
-                userId,
-                username,
-                hashedPassword, // Senha encriptada para o SQLite
-                nome,
-                email,
-                telefone || null,
-                'Admin',
-                'ativo'
-            ], (err) => {
-                if (err) {
-                    reject(err);
-                } else {
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    userId,
+                    username,
+                    hashedPassword, // Senha encriptada para o SQLite
+                    nome,
+                    email,
+                    telefone || null,
+                    'Admin',
+                    'ativo'
+                ], (err) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
+                });
+            });
+
+            await new Promise((resolve, reject) => {
+                db.run('COMMIT', (err) => {
+                    if (err) reject(err);
                     resolve();
+                });
+            });
+
+            res.status(201).json({
+                message: 'Primeiro admin criado com sucesso',
+                user: {
+                    id: user._id,
+                    nome: user.nome,
+                    email: user.email,
+                    role: user.role
                 }
             });
-        });
 
-        await new Promise((resolve, reject) => {
-            db.run('COMMIT', (err) => {
-                if (err) reject(err);
-                resolve();
-            });
-        });
+        } catch (error) {
+            console.error('Erro ao criar primeiro admin:', error);
 
-        res.status(201).json({
-            message: 'Primeiro admin criado com sucesso',
-            user: {
-                id: user._id,
-                nome: user.nome,
-                email: user.email,
-                role: user.role
+            if (transaction) {
+                await new Promise((resolve) => {
+                    db.run('ROLLBACK', () => resolve());
+                });
             }
-        });
 
-    } catch (error) {
-        console.error('Erro ao criar primeiro admin:', error);
-        
-        if (transaction) {
-            await new Promise((resolve) => {
-                db.run('ROLLBACK', () => resolve());
-            });
-        }
-
-        if (user?._id) {
-            try {
-                await User.findByIdAndDelete(user._id);
-            } catch (deleteError) {
-                console.error('Erro ao deletar usuário do MongoDB:', deleteError);
+            if (user?._id) {
+                try {
+                    await User.findByIdAndDelete(user._id);
+                } catch (deleteError) {
+                    console.error('Erro ao deletar usuário do MongoDB:', deleteError);
+                }
             }
+
+            res.status(500).json({ error: error.message });
+        } finally {
+            db.close();
         }
-
-        res.status(500).json({ error: error.message });
-    } finally {
-        db.close();
-    }
-},
+    },
 
 
-       // PUT: /api/users/:id/photo
+    // PUT: /api/users/:id/photo
     // Headers: Authorization: Bearer {token}
     // Body: form-data { photo: File }
 
@@ -606,8 +662,8 @@ createFirstAdmin: async (req, res) => {
             console.log(`PUT: /api/users/${userId}/photo`);
             try {
                 if (!req.file) {
-                    return res.status(400).json({ 
-                        error: 'Nenhuma foto enviada' 
+                    return res.status(400).json({
+                        error: 'Nenhuma foto enviada'
                     });
                 }
 
@@ -618,17 +674,17 @@ createFirstAdmin: async (req, res) => {
 
                 const user = await User.findById(req.params.id);
                 if (!user) {
-                    return res.status(404).json({ 
-                        error: 'Usuário não encontrado' 
+                    return res.status(404).json({
+                        error: 'Usuário não encontrado'
                     });
                 }
 
                 // Verificar permissões
-                if (req.user.role !== 'Admin' && 
-                    req.user.role !== 'Manager' && 
+                if (req.user.role !== 'Admin' &&
+                    req.user.role !== 'Manager' &&
                     req.user._id.toString() !== req.params.id) {
-                    return res.status(403).json({ 
-                        error: 'Sem permissão' 
+                    return res.status(403).json({
+                        error: 'Sem permissão'
                     });
                 }
 
@@ -716,6 +772,7 @@ createFirstAdmin: async (req, res) => {
     update: async (req, res) => {
         const userId = req.params.id;
         console.log(`PUT: /api/users/${userId} - ${JSON.stringify(req.body)}`);
+
         try {
             const updates = req.body;
             const user = await User.findById(userId);
@@ -725,21 +782,77 @@ createFirstAdmin: async (req, res) => {
                 return res.status(404).json({ error: 'Usuário não encontrado' });
             }
 
-            // Verificar permissões
-            if (!await checkUserPermissions(req.user, user)) {
-                return res.status(403).json({ error: 'Sem permissão para atualizar este usuário' });
+            // 🔒 Verificar permissões para alteração de senha
+            if (updates.password) {
+                if (req.user._id.toString() !== userId && !['Admin', 'Manager'].includes(req.user.role)) {
+                    return res.status(403).json({ error: 'Você não tem permissão para alterar a senha de outro usuário.' });
+                }
+
+                console.log(`🔑 Atualizando senha do usuário ${user.nome}`);
+
+                // Senha fica **em texto puro** no MongoDB
+                user.password = updates.password;
+
+                // Senha **é encriptada** no SQLite antes de salvar
+                updates.password = await bcrypt.hash(updates.password, 10);
             }
 
-            // Apenas Admin e Manager podem atualizar role
-            if (updates.role && !['Admin', 'Manager'].includes(req.user.role)) {
-                delete updates.role;
+            // 🔒 Verificar permissões para alteração de role
+            if (updates.role) {
+                if (updates.role === 'Admin' && req.user.role !== 'Admin') {
+                    return res.status(403).json({ error: 'Apenas o Admin pode atribuir a role de Admin.' });
+                }
+
+                if (updates.role === 'Manager' && !['Admin', 'Manager'].includes(req.user.role)) {
+                    return res.status(403).json({ error: 'Apenas Admins e Managers podem atribuir a role de Manager.' });
+                }
+
+                if (['Diretor de RH', 'Diretor Comercial', 'Diretor de Marketing',
+                    'Diretor de Crédito', 'Diretor de Remodelações', 'Diretor Financeiro',
+                    'Diretor Jurídico'].includes(updates.role) &&
+                    !['Admin', 'Manager', 'Recrutador'].includes(req.user.role)) {
+                    return res.status(403).json({ error: 'Apenas Admins, Managers e Recrutadores podem atribuir essas funções.' });
+                }
+
+                if (!['Admin', 'Manager', 'Recrutador'].includes(req.user.role)) {
+                    return res.status(403).json({ error: 'Você não tem permissão para alterar roles.' });
+                }
             }
 
+            // Criar histórico da atualização
+            const historicoAtualizacao = Object.keys(updates).map(campo => ({
+                tipo: "atualizacao",
+                campo: campo,
+                valorAntigo: user[campo] || "N/A",
+                valorNovo: updates[campo],
+                data: new Date(),
+                autor: req.user && req.user._id ? new mongoose.Types.ObjectId(req.user._id) : null
+            }));
+
+
+            // Atualizar os dados do usuário no MongoDB
             Object.keys(updates).forEach(key => {
-                if (key !== 'password' && key !== 'photo') {
+                if (key !== 'photo') {
                     user[key] = updates[key];
                 }
             });
+
+
+            user.historico = user.historico.map(entry => ({
+                ...entry,
+                autor: mongoose.isValidObjectId(entry.autor) 
+                    ? new mongoose.Types.ObjectId(entry.autor) 
+                    : req.user?._id ? new mongoose.Types.ObjectId(req.user._id) : new mongoose.Types.ObjectId("000000000000000000000000")
+            })).concat(historicoAtualizacao.map(entry => ({
+                ...entry,
+                autor: req.user?._id && mongoose.isValidObjectId(req.user._id) 
+                    ? new mongoose.Types.ObjectId(req.user._id) 
+                    : new mongoose.Types.ObjectId("000000000000000000000000")
+            })));
+            
+            
+
+            console.log("📜 Histórico corrigido antes de salvar:", JSON.stringify(user.historico, null, 2));
 
             await user.save();
 
@@ -748,8 +861,10 @@ createFirstAdmin: async (req, res) => {
                 UPDATE usuarios 
                 SET nome = ?,
                     email = ?,
+                    telefone = ?,
                     departamento = ?,
                     role = ?,
+                    password = ?,
                     atualizado_em = ?,
                     atualizado_por = ?
                 WHERE id = ?
@@ -759,8 +874,10 @@ createFirstAdmin: async (req, res) => {
                 db.run(sqliteQuery, [
                     user.nome,
                     user.email,
+                    user.telefone,
                     user.departamento,
                     user.role,
+                    updates.password || user.password, // ✅ Salva senha encriptada no SQLite
                     new Date().toISOString(),
                     req.user._id.toString(),
                     userId
@@ -770,15 +887,14 @@ createFirstAdmin: async (req, res) => {
                 });
             });
 
-            console.log(`Success: User ${user.nome} updated successfully`);
+            console.log(`✅ Sucesso: Usuário ${user.nome} atualizado`);
             res.json({ message: 'Usuário atualizado com sucesso', user });
+
         } catch (error) {
-            console.error("Error updating user:", error);
+            console.error("❌ Erro ao atualizar usuário:", error);
             res.status(500).json({ error: error.message });
         }
     },
-
-    
 };
 
 module.exports = { UserController, upload };

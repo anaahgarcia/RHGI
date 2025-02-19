@@ -22,7 +22,7 @@ router.post('/register',
     verifyRole(['Admin', 'Manager', 'Diretor de RH', 'Diretor Comercial',
         'Diretor de Marketing', 'Diretor de Crédito', 'Diretor de Remodelações',
         'Diretor Financeiro', 'Diretor Jurídico', 'Recrutador',
-        'Broker de Equipa']),
+        'Broker de Equipa', 'Consultor', 'Employee']),
     UserController.registerUser
 );
 
