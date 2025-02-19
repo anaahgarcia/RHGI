@@ -57,6 +57,10 @@ const UserController = {
     // Registro de novo usuário
     registerUser: async (req, res) => {
         console.log("POST: /api/users/register - " + JSON.stringify(req.body));
+        const db = new sqlite3.Database('HRdatabase.db'); 
+        let transaction = false; 
+        let user; 
+    
         try {
             const {
                 username,
@@ -67,9 +71,32 @@ const UserController = {
                 departamento,
                 agencias,
                 responsavelId,
-                brokerEquipaId
+                brokerEquipaId,
+                telefone
             } = req.body;
-
+    
+            const existingUser = await User.findOne({ 
+                $or: [
+                    { username },
+                    { email }
+                ]
+            });
+    
+            if (existingUser) {
+                return res.status(400).json({ 
+                    error: 'Username ou email já está em uso' 
+                });
+            }
+    
+            // Iniciar transação SQLite
+            await new Promise((resolve, reject) => {
+                db.run('BEGIN TRANSACTION', (err) => {
+                    if (err) reject(err);
+                    resolve();
+                });
+            });
+            transaction = true;
+    
             // Validar roles permitidas
             const rolesValidas = [
                 'Admin',
@@ -86,78 +113,117 @@ const UserController = {
                 'Consultor',
                 'Employee'
             ];
-
-
+    
             if (!rolesValidas.includes(role)) {
                 return res.status(400).json({ error: 'Função inválida' });
             }
     
-            // Apenas Admin pode criar Managers e Admins
-            if ((role === 'Manager' || role === 'Admin') && req.user.role !== 'Admin') {
-                return res.status(403).json({ error: 'Apenas Admin pode criar Managers ou Admins' });
-            }
+            // Validar permissões apenas se não for Admin ou Manager
+            if (role !== 'Admin' && role !== 'Manager') {
+                if (!req.user) {
+                    return res.status(403).json({ error: 'Permissão negada' });
+                }
     
-            // Outros usuários podem criar qualquer role, exceto Admin e Manager
-            if (req.user.role !== 'Admin' && req.user.role !== 'Manager') {
-                if (role === 'Admin' || role === 'Manager') {
-                    return res.status(403).json({ error: 'Sem permissão para criar Admin ou Manager' });
+                if (req.user.role !== 'Admin' && !responsavelId) {
+                    return res.status(400).json({ error: 'Usuários precisam de um responsável associado' });
                 }
             }
     
-            // Se não for Admin ou Manager, garantir que tenha um responsável associado
-            if (req.user.role !== 'Admin' && req.user.role !== 'Manager' && !responsavelId) {
-                return res.status(400).json({ error: 'Usuários precisam de um responsável associado' });
-            }
-
-            // Criar usuário no MongoDB
-            const user = new User({
+            // Criar ID que será usado em ambos os bancos
+            const userId = new mongoose.Types.ObjectId();
+    
+            // Criar no MongoDB primeiro
+            user = new User({
+                _id: userId,
                 username,
-                password,
+                password, // Senha em plain text no MongoDB
                 nome,
                 email,
+                telefone,
                 role,
                 departamento,
                 agencias,
                 responsavelId,
                 brokerEquipaId,
-                status: 'ativo',
-                criadoPor: req.user._id
+                status: 'ativo'
             });
-
+    
             await user.save();
-
-            // Salvar no SQLite
+    
+            // Encriptar senha para o SQLite
+            const hashedPassword = await bcrypt.hash(password, 10);
+    
+            // Inserir no SQLite
             const sqliteQuery = `
                 INSERT INTO usuarios (
-                    id, username, nome, email, role, departamento, status, criado_em, criado_por
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `;
-
-            await new Promise((resolve, reject) => {
-                db.run(sqliteQuery, [
-                    user._id.toString(),
+                    id,
                     username,
+                    password,
                     nome,
                     email,
+                    telefone,
                     role,
                     departamento,
-                    'ativo',
-                    new Date().toISOString(),
-                    req.user._id.toString()
+                    status,
+                    criado_em
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `;
+    
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    userId.toString(),
+                    username,
+                    hashedPassword,
+                    nome,
+                    email,
+                    telefone || null,
+                    role,
+                    departamento || null,
+                    'ativo'
                 ], (err) => {
                     if (err) reject(err);
                     else resolve();
                 });
             });
-
+    
+            // Commit da transação
+            await new Promise((resolve, reject) => {
+                db.run('COMMIT', (err) => {
+                    if (err) reject(err);
+                    resolve();
+                });
+            });
+    
             res.status(201).json({ 
                 message: 'Usuário criado com sucesso', 
-                user 
+                user: {
+                    id: user._id,
+                    nome: user.nome,
+                    email: user.email,
+                    role: user.role
+                }
             });
-
+    
         } catch (error) {
             console.error('Erro ao criar usuário:', error);
+            
+            if (transaction) {
+                await new Promise((resolve) => {
+                    db.run('ROLLBACK', () => resolve());
+                });
+            }
+    
+            if (user?._id) {
+                try {
+                    await User.findByIdAndDelete(user._id);
+                } catch (deleteError) {
+                    console.error('Erro ao deletar usuário do MongoDB:', deleteError);
+                }
+            }
+    
             res.status(500).json({ error: error.message });
+        } finally {
+            db.close();
         }
     },
 
@@ -431,11 +497,11 @@ createFirstAdmin: async (req, res) => {
         user = new User({
             _id: userId,
             username,
-            password, // Senha sem encriptação para o MongoDB
+            password, // Senha em plain text para MongoDB
             nome,
             email,
             telefone,
-            role: 'Admin',
+            role: 'Admin', // ✅ Valor fixo para Admin
             status: 'ativo'
         });
 
