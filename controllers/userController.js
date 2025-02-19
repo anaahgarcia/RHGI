@@ -7,8 +7,7 @@ const { Agency } = require('../models/agencyModel');
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('HRdatabase.db');
 const mongoose = require('mongoose');
-
-const securekey = "chave_super_secreta_do_jwt";
+const { SECRET_KEY } = require('../middleware');
 
 
 // Configuração do multer para upload de fotos
@@ -113,7 +112,7 @@ const UserController = {
             // Criar usuário no MongoDB
             const user = new User({
                 username,
-                password: await bcrypt.hash(password, 10),
+                password,
                 nome,
                 email,
                 role,
@@ -193,7 +192,7 @@ const UserController = {
             }
     
             const token = jwt.sign(
-                { id: user._id.toString(), role: user.role },
+                { id: user._id, role: user.role },
                 SECRET_KEY,
                 { expiresIn: '24h' }
             );

@@ -1,20 +1,13 @@
-require('dotenv').config(); // Carregar as variáveis do .env
 const jwt = require('jsonwebtoken');
 const { User } = require('./models/userModel');
 
-const SECRET_KEY = process.env.JWT_SECRET || "chave_super_secreta_do_jwt";
-
-// 🚨 Se `SECRET_KEY` não estiver definido, o servidor não inicia
-if (!process.env.JWT_SECRET) {
-    console.error("⚠️ SECRET_KEY is not defined in the .env file. Server cannot start.");
-    process.exit(1);
-}
+// Definir a chave secreta como uma constante
+const SECRET_KEY = "chave_super_secreta_do_jwt";
 
 const handleError = (res, status, message) => {
     return res.status(status).json({ error: message });
 };
 
-// ✅ Middleware para verificar o token JWT
 const verifyToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
 
@@ -32,23 +25,14 @@ const verifyToken = (req, res, next) => {
             return handleError(res, 403, 'Invalid token');
         }
 
-        console.log("Decoded User:", decodedUser);
-
-        if (!decodedUser.id) {
-            return handleError(res, 403, 'Invalid token structure: missing user ID');
-        }
-
         req.user = decodedUser;
         next();
     });
 };
 
-// ✅ Middleware para verificar a role do usuário
 const verifyRole = (roles) => {
     return (req, res, next) => {
-        console.log("User in verifyRole:", req.user);
-
-        // 🚨 Admin tem acesso irrestrito, então pode passar direto
+        // Admin tem acesso irrestrito
         if (req.user.role === "Admin") {
             return next();
         }
@@ -61,7 +45,6 @@ const verifyRole = (roles) => {
     };
 };
 
-// ✅ Middleware para verificar acesso a uma agência específica
 const verifyAgencyAccess = async (req, res, next) => {
     try {
         if (!req.user || !req.user.id) {
@@ -77,7 +60,7 @@ const verifyAgencyAccess = async (req, res, next) => {
             return handleError(res, 404, 'User not found');
         }
 
-        // 🚨 Se for Admin, pode acessar qualquer agência
+        // Se for Admin, pode acessar qualquer agência
         if (user.role === "Admin") {
             return next();
         }
@@ -98,8 +81,10 @@ const verifyAgencyAccess = async (req, res, next) => {
     }
 };
 
+// Exportar tudo o que precisamos, incluindo a SECRET_KEY
 module.exports = { 
     verifyToken, 
     verifyRole, 
-    verifyAgencyAccess 
+    verifyAgencyAccess,
+    SECRET_KEY  // Exportar a chave para usar em outros arquivos
 };
