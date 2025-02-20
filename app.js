@@ -7,6 +7,8 @@ var logger = require('morgan');
 var mongoose = require('mongoose');
 var sqlite3 = require('sqlite3').verbose();
 
+
+
 // Rotas
 var UserRoutes = require('./routes/userRoutes');
 var AgencyRoutes = require('./routes/agencyRoutes');
@@ -17,6 +19,9 @@ var AppointmentRoutes = require('./routes/appointmentRoutes');
 var CvAnalysisRoutes = require('./routes/cvAnalysisRoutes');
 var DepartmentRoutes = require('./routes/departmentRoutes');
 var ReportRoutes = require('./routes/reportRoutes');
+const agencyRoutes = require('./routes/agencyRoutes');
+
+
 
 var app = express();
 
@@ -60,6 +65,7 @@ app.use('/api/appointments', AppointmentRoutes);
 app.use('/api/cvAnalysis', CvAnalysisRoutes);
 app.use('/api/departments', DepartmentRoutes);
 app.use('/api/reports', ReportRoutes);
+app.use('/api/agencias', agencyRoutes);
 
 // Tratamento de erros 404
 app.use(function(req, res, next) {

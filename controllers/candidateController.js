@@ -4,14 +4,20 @@ const { User } = require('../models/userModel');
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('HRDatabase.db');
 
+
+
+// http://localhost:8080/api/candidates/{id}/documents
+// Content-Type: multipart/form-data  Authorization: Bearer {seu_token}
+
+
 // Configuração do multer para upload de documentos
 const upload = multer({
     limits: {
         fileSize: 10 * 1024 * 1024 // 10MB
     },
     fileFilter(req, file, cb) {
-        if (!file.originalname.match(/\.(pdf|doc|docx)$/)) {
-            return cb(new Error('Por favor, envie apenas arquivos PDF ou Word'));
+        if (!file.originalname.match(/\.(pdf|doc|docx|jpg|jpeg|png)$/)) {
+            return cb(new Error('Por favor, envie apenas arquivos nos formatos pemitidos'));
         }
         cb(undefined, true);
     }

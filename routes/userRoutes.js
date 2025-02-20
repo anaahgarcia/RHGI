@@ -30,6 +30,16 @@ router.post('/register',
 router.get('/', UserController.getUsuarios);
 router.get('/:id', UserController.getUsuario);
 
+// Rota para reativar usuário
+router.put('/:id/reactivate',
+    verifyRole(['Admin', 'Manager']),
+    UserController.reativarUsuario
+);
+
+
+// Rota específica para alteração de senha (qualquer usuário pode alterar sua própria senha)
+router.put('/:id/change-password', UserController.changePassword);
+
 // Rotas de atualização
 router.put('/:id',
     verifyRole(['Admin', 'Manager', 'Diretor de RH', 'Diretor Comercial',

@@ -9,7 +9,6 @@ const db = new sqlite3.Database('HRdatabase.db');
 const mongoose = require('mongoose');
 const { SECRET_KEY } = require('../middleware');
 
-
 // Configuração do multer para upload de fotos
 const upload = multer({
     limits: {
@@ -365,13 +364,13 @@ const UserController = {
                 }
 
                 if (req.user.role.startsWith('Diretor')) {
-                    if (['Admin', 'Manager'].includes(userToInactivate.role) ||
-                        userToInactivate.departamento !== req.user.departamento) {
+                    if (['Admin', 'Manager'].includes(userToInactivate.role)) {
                         return res.status(403).json({
-                            error: 'Sem permissão para inativar este usuário'
+                            error: 'Diretores não podem inativar Admins ou Managers'
                         });
                     }
                 }
+                
             }
 
             // Atualizar no MongoDB
@@ -761,6 +760,151 @@ const UserController = {
         }
     },
 
+
+    changePassword: async (req, res) => {
+        const userId = req.params.id;
+
+        try {
+            // Verificar se o ID do usuário é válido
+            if (!userId) {
+                return res.status(400).json({ error: 'ID de usuário inválido' });
+            }
+
+            // Verificar se req.user existe
+            if (!req.user || !req.user.id) {
+                return res.status(401).json({ error: 'Usuário não autenticado' });
+            }
+
+            // Verificar se é o próprio usuário (com verificação segura)
+            if (req.user.id.toString() !== userId) {
+                return res.status(403).json({ error: 'Você só pode alterar sua própria senha' });
+            }
+
+            const { password } = req.body;
+            if (!password) {
+                return res.status(400).json({ error: 'Nova senha é obrigatória' });
+            }
+
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ error: 'Usuário não encontrado' });
+            }
+
+            // Atualizar senha no MongoDB
+            user.password = password;
+
+            // Criar histórico da alteração
+            if (!user.historico) {
+                user.historico = [];
+            }
+
+            user.historico.push({
+                tipo: "atualizacao",
+                campo: "password",
+                valorAntigo: "[PROTEGIDO]",
+                valorNovo: "[PROTEGIDO]",
+                data: new Date(),
+                autor: req.user._id
+            });
+
+            await user.save();
+
+            // Atualizar no SQLite com senha encriptada
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            const sqliteQuery = `
+                UPDATE usuarios 
+                SET password = ?,
+                    atualizado_em = ?
+                WHERE id = ?
+            `;
+
+            await new Promise((resolve, reject) => {
+                const db = new sqlite3.Database('HRdatabase.db');
+                db.run(sqliteQuery, [
+                    hashedPassword,
+                    new Date().toISOString(),
+                    userId
+                ], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                    db.close();
+                });
+            });
+
+            res.json({ message: 'Senha atualizada com sucesso' });
+
+        } catch (error) {
+            console.error("Erro ao atualizar senha:", error);
+            res.status(500).json({ error: error.message });
+        }
+    },
+
+// PUT: /api/users/:id/reactivate
+// Headers: Authorization: Bearer {token}
+reativarUsuario: async (req, res) => {
+    const userId = req.params.id;
+    console.log(`PUT: /api/users/${userId}/reactivate`);
+
+    try {
+        const userToReactivate = await User.findById(userId);
+
+        if (!userToReactivate) {
+            return res.status(404).json({
+                error: 'Usuário não encontrado'
+            });
+        }
+
+        // Verificar se o usuário já está ativo
+        if (userToReactivate.status === 'ativo') {
+            return res.status(400).json({
+                error: 'O usuário já está ativo'
+            });
+        }
+
+        // Verificar permissões (apenas Admins ou Managers podem reativar)
+        if (!['Admin', 'Manager'].includes(req.user.role)) {
+            return res.status(403).json({
+                error: 'Sem permissão para reativar este usuário'
+            });
+        }
+
+        // Atualizar no MongoDB
+        userToReactivate.status = 'ativo';
+        userToReactivate.inativadoEm = null;
+        userToReactivate.inativadoPor = null;
+        userToReactivate.motivoInativacao = null;
+        await userToReactivate.save();
+
+        // Atualizar no SQLite
+        const sqliteQuery = `
+            UPDATE usuarios 
+            SET status = ?, 
+                inativado_em = NULL, 
+                inativado_por = NULL 
+            WHERE id = ?
+        `;
+
+        await new Promise((resolve, reject) => {
+            db.run(sqliteQuery, [
+                'ativo',
+                userToReactivate._id.toString()
+            ], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+
+        res.json({ message: 'Usuário reativado com sucesso' });
+
+    } catch (error) {
+        console.error('Erro ao reativar usuário:', error);
+        res.status(500).json({ error: error.message });
+    }
+},
+
+
+
     // PUT: /api/users/:id/update
     // Headers: Authorization: Bearer {token}
     // Body: {
@@ -783,12 +927,20 @@ const UserController = {
                 return res.status(404).json({ error: 'Usuário não encontrado' });
             }
 
-            // 🔒 Verificar permissões para alteração de senha
-            if (updates.password) {
-                if (req.user._id.toString() !== userId && !['Admin', 'Manager'].includes(req.user.role)) {
-                    return res.status(403).json({ error: 'Você não tem permissão para alterar a senha de outro usuário.' });
-                }
+            // Verificação unificada de permissões
+            if (!(
+                ['Admin', 'Manager'].includes(req.user.role) || // Admin e Manager podem atualizar qualquer um
+                (req.user.role === 'Recrutador' && user.role === 'Consultor') || // Recrutador pode atualizar Consultor
+                (req.user.role.includes('Diretor') && !['Admin', 'Manager'].includes(user.role) && !user.role.includes('Diretor')) || // Diretores podem atualizar qualquer um exceto Admin, Manager e outros Diretores
+                req.user._id.toString() === userId // Usuário pode atualizar a si mesmo
+            )) {
+                return res.status(403).json({
+                    error: 'Você não tem permissão para atualizar este usuário.'
+                });
+            }
 
+            // 🔒 Verificar permissões específicas para alteração de senha
+            if (updates.password) {
                 console.log(`🔑 Atualizando senha do usuário ${user.nome}`);
 
                 // Senha fica **em texto puro** no MongoDB
@@ -798,24 +950,28 @@ const UserController = {
                 updates.password = await bcrypt.hash(updates.password, 10);
             }
 
-            // 🔒 Verificar permissões para alteração de role
+            // 🔒 Verificar permissões específicas para alteração de role
             if (updates.role) {
+                // Apenas Admin pode atribuir role de Admin
                 if (updates.role === 'Admin' && req.user.role !== 'Admin') {
                     return res.status(403).json({ error: 'Apenas o Admin pode atribuir a role de Admin.' });
                 }
 
+                // Apenas Admin e Manager podem atribuir role de Manager
                 if (updates.role === 'Manager' && !['Admin', 'Manager'].includes(req.user.role)) {
                     return res.status(403).json({ error: 'Apenas Admins e Managers podem atribuir a role de Manager.' });
                 }
 
-                if (['Diretor de RH', 'Diretor Comercial', 'Diretor de Marketing',
-                    'Diretor de Crédito', 'Diretor de Remodelações', 'Diretor Financeiro',
-                    'Diretor Jurídico'].includes(updates.role) &&
-                    !['Admin', 'Manager', 'Recrutador'].includes(req.user.role)) {
-                    return res.status(403).json({ error: 'Apenas Admins, Managers e Recrutadores podem atribuir essas funções.' });
+                // Verificar se um Diretor está tentando mudar a role de Admin, Manager ou outro Diretor
+                if (req.user.role.includes('Diretor')) {
+                    if (['Admin', 'Manager'].includes(user.role) || user.role.includes('Diretor')) {
+                        return res.status(403).json({ error: 'Diretores não podem alterar a role de Admin, Manager ou outros Diretores.' });
+                    }
                 }
 
-                if (!['Admin', 'Manager', 'Recrutador'].includes(req.user.role)) {
+                // Verificação global de permissões para alterar roles
+                if (!['Admin', 'Manager', 'Recrutador'].includes(req.user.role) &&
+                    !req.user.role.includes('Diretor')) {
                     return res.status(403).json({ error: 'Você não tem permissão para alterar roles.' });
                 }
             }
@@ -889,6 +1045,8 @@ const UserController = {
             res.status(500).json({ error: error.message });
         }
     },
+
+    
 };
 
 module.exports = { UserController, upload };

@@ -12,38 +12,35 @@ const agencyController = {
       }
 
       const { nome, manager, diretores, departamentos, employees } = req.body;
+      
       if (!nome || !manager) {
         return res.status(400).json({ error: 'Os campos "nome" e "manager" são obrigatórios.' });
       }
 
+      // Criar uma nova agência apenas com nome e manager
       const novaAgencia = new Agency({
         nome,
         manager,
-        diretores: diretores || [],
-        departamentos: departamentos || [],
-        employees: employees || []
+        diretores: diretores || [],        // Pode ser adicionado depois
+        departamentos: departamentos || [], // Pode ser adicionado depois
+        employees: employees || []         // Pode ser adicionado depois
       });
 
       const agenciaSalva = await novaAgencia.save();
 
+      // Inserir no SQLite apenas os campos obrigatórios
       const querySQLite = `
         INSERT INTO agencias (
           id,
           nome,
-          manager,
-          diretores,
-          departamentos,
-          employees
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          manager
+        ) VALUES (?, ?, ?)
       `;
       await new Promise((resolve, reject) => {
         db.run(querySQLite, [
           agenciaSalva._id.toString(),
           nome,
-          manager,
-          JSON.stringify(diretores || []),
-          JSON.stringify(departamentos || []),
-          JSON.stringify(employees || [])
+          manager
         ], (err) => {
           if (err) reject(err);
           else resolve();
@@ -100,12 +97,14 @@ const agencyController = {
       if (!(req.user.role === 'Admin' || req.user.role === 'Manager')) {
         return res.status(403).json({ error: 'Sem permissão para atualizar agências.' });
       }
+
       const agencia = await Agency.findById(req.params.id);
       if (!agencia) {
         return res.status(404).json({ error: 'Agência não encontrada.' });
       }
 
       const { nome, manager, diretores, departamentos, employees } = req.body;
+
       if (nome) agencia.nome = nome;
       if (manager) agencia.manager = manager;
       if (diretores) agencia.diretores = diretores;
@@ -114,6 +113,7 @@ const agencyController = {
 
       const agenciaAtualizada = await agencia.save();
 
+      // Atualizar SQLite
       const querySQLite = `
         UPDATE agencias
         SET nome = ?,

@@ -10,8 +10,8 @@ const upload = multer({
         fileSize: 10 * 1024 * 1024 // 10MB
     },
     fileFilter(req, file, cb) {
-        if (!file.originalname.match(/\.(pdf|doc|docx)$/)) {
-            return cb(new Error('Por favor, envie apenas arquivos PDF ou Word'));
+        if (!file.originalname.match(/\.(pdf|doc|docx|jpg|jpeg|png)$/)) {
+            return cb(new Error('Por favor, envie apenas arquivos nos formatos permitidos.'));
         }
         cb(undefined, true);
     }

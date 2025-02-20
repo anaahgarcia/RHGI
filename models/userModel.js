@@ -37,6 +37,7 @@ role: {
     enum: [
         'Admin',
         'Manager',
+        'Diretor',
         'Diretor de RH',
         'Diretor Comercial',
         'Diretor de Marketing',

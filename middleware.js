@@ -25,7 +25,10 @@ const verifyToken = (req, res, next) => {
             return handleError(res, 403, 'Invalid token');
         }
 
-        req.user = decodedUser;
+        req.user = {
+            ...decodedUser,
+            _id: decodedUser.id  // Adicionar _id para compatibilidade
+        };
         next();
     });
 };
