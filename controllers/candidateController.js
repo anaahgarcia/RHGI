@@ -5,10 +5,8 @@ const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('HRDatabase.db');
 
 
-
 // http://localhost:8080/api/candidates/{id}/documents
 // Content-Type: multipart/form-data  Authorization: Bearer {seu_token}
-
 
 // Configuração do multer para upload de documentos
 const upload = multer({
@@ -32,7 +30,6 @@ const CandidateController = {
                 nome,
                 email,
                 telefone,
-                nif,
                 tipo_contato,
                 importancia,
                 origem_contato,
@@ -48,12 +45,11 @@ const CandidateController = {
                 return res.status(400).json({ error: "O nome deve ser preenchido." });
             }
 
-            // Verificar se já existe um candidato com mesmo email ou NIF
+            // Verificar se já existe um candidato com EXATAMENTE o mesmo nome, email E telefone
             const existingCandidate = await Contact.findOne({
-                $or: [
-                    { email: email.toLowerCase() },
-                    { nif: nif }
-                ]
+                nome: nome,
+                email: email.toLowerCase(),
+                telefone: telefone
             });
 
             if (existingCandidate) {
@@ -89,13 +85,12 @@ const CandidateController = {
                 nome,
                 email: email.toLowerCase(),
                 telefone,
-                nif,
                 tipo_contato,
                 importancia,
                 origem_contato,
                 departamento,
                 agencia,
-                status: 'identificacao', // Alterado para refletir o pipeline de recrutamento
+                status: 'ativo',
                 pipeline_status: 'identificacao',
                 indicacao: indicacao || false,
                 nivel_indicacao,
@@ -128,7 +123,6 @@ const CandidateController = {
                     nome,
                     email,
                     telefone,
-                    nif,
                     status,
                     pipeline_status,
                     indicacao,
@@ -137,7 +131,7 @@ const CandidateController = {
                     responsavel_id,
                     criado_em,
                     criado_por
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             await new Promise((resolve, reject) => {
@@ -146,8 +140,7 @@ const CandidateController = {
                     nome,
                     email.toLowerCase(),
                     telefone,
-                    nif,
-                    'identificacao',
+                    'ativo',
                     'identificacao',
                     indicacao ? 1 : 0,
                     nivel_indicacao || null,
@@ -319,36 +312,36 @@ const CandidateController = {
         }
     },
 
-    // Buscar todos os candidatos
-    getCandidates: async (req, res) => {
-        console.log("GET: /api/candidates");
-        
-        try {
-            const query = {
-                'responsaveis': {
-                    $elemMatch: {
-                        userId: req.user._id,
-                        status: 'ativo'
+        // Buscar todos os candidatos
+        getCandidates: async (req, res) => {
+            console.log("GET: /api/candidates");
+            
+            try {
+                const query = {
+                    'responsaveis': {
+                        $elemMatch: {
+                            userId: req.user._id,
+                            status: 'ativo'
+                        }
                     }
-                }
-            };
-
-            // Aplicar filtros se fornecidos
-            if (req.query.status) query.status = req.query.status;
-            if (req.query.departamento) query.departamento = req.query.departamento;
-            if (req.query.origem_contato) query.origem_contato = req.query.origem_contato;
-
-            const candidates = await Contact.find(query)
-                .populate('responsaveis.userId', 'nome email')
-                .sort({ createdAt: -1 });
-
-            console.log(`Success: Retrieved ${candidates.length} candidates`);
-            res.json(candidates);
-        } catch (error) {
-            console.error("Error fetching candidates:", error);
-            res.status(500).json({ error: error.message });
-        }
-    },
+                };
+    
+                // Aplicar filtros se fornecidos
+                if (req.query.status) query.status = req.query.status;
+                if (req.query.departamento) query.departamento = req.query.departamento;
+                if (req.query.origem_contato) query.origem_contato = req.query.origem_contato;
+    
+                const candidates = await Contact.find(query)
+                    .populate('responsaveis.userId', 'nome email')
+                    .sort({ createdAt: -1 });
+    
+                console.log(`Success: Retrieved ${candidates.length} candidates`);
+                res.json(candidates);
+            } catch (error) {
+                console.error("Error fetching candidates:", error);
+                res.status(500).json({ error: error.message });
+            }
+        },
 
     // Buscar candidato específico
     getCandidate: async (req, res) => {

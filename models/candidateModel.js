@@ -39,23 +39,6 @@ const contactSchema = new mongoose.Schema({
     }
   },
 
-  nif: {
-    type: String,
-    required: true,
-    trim: true,
-    validate: {
-      validator: async function(v) {
-        if (!/^\d{9}$/.test(v)) return false;
-        if (this.isNew) {
-          const existingCandidate = await mongoose.models.Contact.findOne({ nif: v });
-          return !existingCandidate;
-        }
-        return true;
-      },
-      message: 'NIF inválido ou já cadastrado.'
-    }
-  },
-
   tipo_contato: {
     type: String,
     required: true,
@@ -282,7 +265,6 @@ const contactSchema = new mongoose.Schema({
 
 // Índices
 contactSchema.index({ email: 1 });
-contactSchema.index({ nif: 1 }, { unique: true });
 contactSchema.index({ 'responsaveis.userId': 1, 'responsaveis.status': 1 });
 contactSchema.index({ status: 1 });
 contactSchema.index({ pipeline_status: 1 });
