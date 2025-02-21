@@ -43,7 +43,7 @@ const contactSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: {
-      values: ['Recrutamento'],
+      values: ['Recrutamento', 'Comercial', 'Marketing', 'Financeiro', 'Crédito', 'Jurídico', 'Remodelações', 'Outro'],
       message: 'Tipo de contato inválido.'
     }
   },

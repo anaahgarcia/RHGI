@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const CandidateController = require('../controllers/candidateController');
 const { verifyToken, checkRole } = require('../middleware');
 const multer = require('multer');
+const CandidateController = require('../controllers/candidateController');
 
 // Configuração do Multer para upload de arquivos
 const upload = multer({
@@ -32,6 +32,11 @@ router.put('/:id/inactivate', CandidateController.inactivateCandidate);
 
 // Rotas de interação
 router.post('/:id/interaction', CandidateController.addInteraction);
+
+router.get('/inactive', CandidateController.getInactiveCandidates);
+
+router.get('/:id/reactivate', CandidateController.reactivateCandidate);
+
 
 // Rotas de documentos (CV e Carta de Motivação)
 router.post('/:id/documents', upload.single('document'), async (req, res) => {
