@@ -58,14 +58,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Rotas da API
 app.use('/api/users', UserRoutes);
-app.use('/api/agencies', AgencyRoutes);
+app.use('/api/agencies', agencyRoutes);
 app.use('/api/tasks', TaskRoutes);
 app.use('/api/candidates', CandidateRoutes);
 app.use('/api/appointments', AppointmentRoutes);
 app.use('/api/cvAnalysis', CvAnalysisRoutes);
 app.use('/api/departments', DepartmentRoutes);
 app.use('/api/reports', ReportRoutes);
-app.use('/api/agencias', agencyRoutes);
+
 
 // Tratamento de erros 404
 app.use(function(req, res, next) {

@@ -28,15 +28,19 @@ const DepartmentController = {
                 INSERT INTO departamentos (
                     id,
                     nome,
-                    manager_id
-                ) VALUES (?, ?, ?)
+                    manager_id,
+                    agencias,
+                    status
+                ) VALUES (?, ?, ?, ?, ?)
             `;
 
             await new Promise((resolve, reject) => {
                 db.run(sqliteQuery, [
                     savedDepartment._id.toString(),
                     nome,
-                    manager
+                    manager,
+                    JSON.stringify(agencias || []),
+                    'ativo'
                 ], (err) => {
                     if (err) reject(err);
                     else resolve();
@@ -68,6 +72,29 @@ const DepartmentController = {
         }
     },
 
+    // GET: /api/departments/:id
+// Headers: Authorization: Bearer {token}
+getDepartmentById: async (req, res) => {
+    const departmentId = req.params.id;
+    console.log(`GET: /api/departments/${departmentId}`);
+    try {
+        const department = await Department.findById(departmentId)
+            .populate('manager', 'nome email')
+            .populate('agencias', 'nome');
+
+        if (!department) {
+            console.log(`Error: Department with ID ${departmentId} not found`);
+            return res.status(404).json({ error: 'Departamento não encontrado' });
+        }
+
+        console.log(`Success: Retrieved department ${department.nome}`);
+        res.json(department);
+    } catch (error) {
+        console.error("Error fetching department:", error);
+        res.status(500).json({ error: error.message });
+    }
+},
+
     // PUT: /api/departments/:id
     // Headers: Authorization: Bearer {token}
     // Body: {
@@ -95,7 +122,8 @@ const DepartmentController = {
             const sqliteQuery = `
                 UPDATE departamentos 
                 SET nome = ?,
-                    manager_id = ?
+                    manager_id = ?,
+                    agencias = ?
                 WHERE id = ?
             `;
 
@@ -103,6 +131,7 @@ const DepartmentController = {
                 db.run(sqliteQuery, [
                     department.nome,
                     department.manager._id.toString(),
+                    JSON.stringify(department.agencias || []),
                     departmentId
                 ], (err) => {
                     if (err) reject(err);
@@ -155,8 +184,49 @@ const DepartmentController = {
             console.error("Error inactivating department:", error);
             res.status(500).json({ error: error.message });
         }
+    },
+
+    // PUT: /api/departments/:id/reactivate
+    // Headers: Authorization: Bearer {token}
+    reactivateDepartment: async (req, res) => {
+        const departmentId = req.params.id;
+        console.log(`PUT: /api/departments/${departmentId}/reactivate`);
+        try {
+            const department = await Department.findByIdAndUpdate(
+                departmentId,
+                { status: 'ativo' },
+                { new: true }
+            );
+
+            if (!department) {
+                console.log(`Error: Department with ID ${departmentId} not found`);
+                return res.status(404).json({ error: 'Departamento não encontrado' });
+            }
+
+            // Atualizar SQLite
+            const sqliteQuery = `
+                UPDATE departamentos 
+                SET status = 'ativo'
+                WHERE id = ?
+            `;
+
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [departmentId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+
+            console.log(`Success: Department ${department.nome} reactivated successfully`);
+            res.json({ 
+                message: 'Departamento reativado com sucesso',
+                department
+            });
+        } catch (error) {
+            console.error("Error reactivating department:", error);
+            res.status(500).json({ error: error.message });
+        }
     }
 };
 
 module.exports = DepartmentController;
-

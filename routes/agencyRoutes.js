@@ -21,4 +21,7 @@ router.put('/:id', agencyController.atualizarAgencia);
 // Rota para excluir (inativar) uma agência (somente Admin e Manager podem excluir)
 router.delete('/:id', agencyController.deletarAgencia);
 
+// Rota para reativar uma agência (somente Admin e Manager podem reativar)
+router.put('/:id/reactivate', agencyController.reativarAgencia);
+
 module.exports = router;

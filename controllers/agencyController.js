@@ -28,24 +28,31 @@ const agencyController = {
 
       const agenciaSalva = await novaAgencia.save();
 
-      // Inserir no SQLite apenas os campos obrigatórios
       const querySQLite = `
-        INSERT INTO agencias (
-          id,
-          nome,
-          manager
-        ) VALUES (?, ?, ?)
-      `;
-      await new Promise((resolve, reject) => {
-        db.run(querySQLite, [
-          agenciaSalva._id.toString(),
-          nome,
-          manager
-        ], (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
+      INSERT INTO agencias (
+        id,
+        nome,
+        manager,
+        diretores,
+        departamentos,
+        employees,
+        status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `;
+    await new Promise((resolve, reject) => {
+      db.run(querySQLite, [
+        agenciaSalva._id.toString(),
+        nome,
+        manager,
+        JSON.stringify(diretores || []),
+        JSON.stringify(departamentos || []),
+        JSON.stringify(employees || []),
+        'ativo'
+      ], (err) => {
+        if (err) reject(err);
+        else resolve();
       });
+    });
 
       return res.status(201).json(agenciaSalva);
     } catch (error) {
@@ -151,7 +158,12 @@ const agencyController = {
       if (!(req.user.role === 'Admin' || req.user.role === 'Manager')) {
         return res.status(403).json({ error: 'Sem permissão para excluir agências.' });
       }
-      const agencia = await Agency.findByIdAndDelete(req.params.id);
+      const agencia = await Agency.findByIdAndUpdate(
+        req.params.id, 
+        { status: 'inativo' },
+        { new: true }
+      );
+      
       if (!agencia) {
         return res.status(404).json({ error: 'Agência não encontrada.' });
       }
@@ -173,7 +185,49 @@ const agencyController = {
       console.error("Erro ao excluir agência:", error);
       res.status(500).json({ error: error.message });
     }
+  },
+
+  // Reativar uma agência – permitido somente para Admin e Manager
+  reativarAgencia: async (req, res) => {
+  console.log(`PUT: /api/agencies/${req.params.id}/reactivate`);
+  try {
+    if (!(req.user.role === 'Admin' || req.user.role === 'Manager')) {
+      return res.status(403).json({ error: 'Sem permissão para reativar agências.' });
+    }
+    
+    const agencia = await Agency.findByIdAndUpdate(
+      req.params.id, 
+      { status: 'ativo' },
+      { new: true }
+    );
+    
+    if (!agencia) {
+      return res.status(404).json({ error: 'Agência não encontrada.' });
+    }
+
+    const querySQLite = `
+      UPDATE agencias
+      SET status = 'ativo'
+      WHERE id = ?
+    `;
+    await new Promise((resolve, reject) => {
+      db.run(querySQLite, [req.params.id], (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    return res.json({ 
+      message: 'Agência reativada com sucesso.',
+      agencia
+    });
+  } catch (error) {
+    console.error("Erro ao reativar agência:", error);
+    res.status(500).json({ error: error.message });
   }
+}
+
+
 };
 
 module.exports = agencyController;
