@@ -3,6 +3,10 @@ const router = express.Router();
 const { verifyToken, checkRole } = require('../middleware');
 const multer = require('multer');
 const CandidateController = require('../controllers/candidateController');
+const { Contact } = require('../models/candidateModel');
+const sqlite3 = require('sqlite3').verbose();
+const db = new sqlite3.Database('HRDatabase.db'); // Definindo a conexão com o banco de dados
+
 
 // Configuração do Multer para upload de arquivos
 const upload = multer({
@@ -20,6 +24,9 @@ const upload = multer({
 // Middleware de autenticação para todas as rotas
 router.use(verifyToken);
 
+// Rotas para filtrar candidatos inativos (Colocado antes das rotas com ID para evitar erro de interpretação)
+router.get('/inactive', CandidateController.getInactiveCandidates);
+
 // Rotas de CRUD básico
 router.post('/', CandidateController.createCandidate);
 router.get('/', CandidateController.getCandidates);
@@ -29,14 +36,10 @@ router.put('/:id', CandidateController.updateCandidate);
 // Rotas de status e pipeline
 router.put('/:id/status', CandidateController.updateCandidateStatus);
 router.put('/:id/inactivate', CandidateController.inactivateCandidate);
+router.put('/:id/reactivate', CandidateController.reactivateCandidate);
 
 // Rotas de interação
 router.post('/:id/interaction', CandidateController.addInteraction);
-
-router.get('/inactive', CandidateController.getInactiveCandidates);
-
-router.get('/:id/reactivate', CandidateController.reactivateCandidate);
-
 
 // Rotas de documentos (CV e Carta de Motivação)
 router.post('/:id/documents', upload.single('document'), async (req, res) => {

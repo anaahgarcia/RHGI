@@ -261,18 +261,38 @@ const CandidateController = {
             }
 
             switch (novo_status) {
+                case 'identificacao':
+                    candidate.metricas.data_identificacao = new Date();
+                    break;
                 case 'lead':
                     candidate.metricas.data_lead = new Date();
                     break;
+                case 'chamada':
+                    candidate.metricas.data_chamada = new Date();
+                    break;
+                case 'agendamentos':
+                    candidate.metricas.data_agendamentos = new Date();
+                    break;
+                case 'entrevistas':
+                    candidate.metricas.data_entrevistas = new Date();
+                    break;
                 case 'recrutado':
                     candidate.metricas.data_recrutamento = new Date();
-                    // Verificar se existe indicação
+                    // Se for indicado, adiciona uma notificação
                     if (candidate.indicacao && candidate.responsavel_indicacao) {
-                        // Adicionar notificação para o responsável da indicação
-                        await adicionarNotificacaoIndicacao(candidate);
+                        await CandidateController.adicionarNotificacaoIndicacao(candidate);
                     }
                     break;
+                case 'inativado':
+                    candidate.metricas.data_inativacao = new Date();
+                    break;
             }
+
+            if (candidate.metricas[`data_${old_status}`]) {
+                const tempoNoStatus = new Date() - new Date(candidate.metricas[`data_${old_status}`]);
+                candidate.metricas[`tempo_${old_status}`] = tempoNoStatus;
+            }
+            
 
             // Calcular tempo no status anterior
             if (candidate.metricas[`data_${old_status}`]) {
@@ -290,28 +310,42 @@ const CandidateController = {
             try {
                 // 1. Primeiro tentamos atualizar o SQLite
                 const sqliteQuery = `
-                    UPDATE candidatos 
-                    SET pipeline_status = ?,
-                        atualizado_em = ?,
-                        atualizado_por = ?
-                    WHERE id = ?
-                `;
-
-                await new Promise((resolve, reject) => {
-                    db.run(sqliteQuery, [
-                        novo_status,
-                        new Date().toISOString(),
-                        req.user._id.toString(),
-                        candidateId
-                    ], (err) => {
-                        if (err) {
-                            console.error("SQLite error:", err);
-                            reject(err);
-                        } else {
-                            resolve();
-                        }
-                    });
+                UPDATE candidatos 
+                SET pipeline_status = ?,
+                    data_identificacao = ?,
+                    data_lead = ?,
+                    data_chamada = ?,
+                    data_agendamentos = ?,
+                    data_entrevistas = ?,
+                    data_recrutamento = ?,
+                    data_inativacao = ?,
+                    atualizado_em = ?,
+                    atualizado_por = ?
+                WHERE id = ?
+            `;
+            
+            await new Promise((resolve, reject) => {
+                db.run(sqliteQuery, [
+                    novo_status,
+                    candidate.metricas.data_identificacao || null,
+                    candidate.metricas.data_lead || null,
+                    candidate.metricas.data_chamada || null,
+                    candidate.metricas.data_agendamentos || null,
+                    candidate.metricas.data_entrevistas || null,
+                    candidate.metricas.data_recrutamento || null,
+                    candidate.metricas.data_inativacao || null,
+                    new Date().toISOString(),
+                    req.user._id.toString(),
+                    candidateId
+                ], (err) => {
+                    if (err) {
+                        console.error("SQLite error:", err);
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
                 });
+            });
 
                 // 2. Se o SQLite for bem-sucedido, salvamos no MongoDB
                 await candidate.save();
@@ -673,35 +707,25 @@ const CandidateController = {
         console.log("GET: /api/candidates/inactive");
     
         try {
-            let query = { status: "inativo" }; // Apenas candidatos inativos
+            let query = { status: "inativo" }; // ✅ Certifique-se de que o filtro está correto
     
-            // Se for Admin ou Manager, pode acessar todos
+            // Aplicar permissões baseadas no cargo do usuário
             if (req.user.role === "Admin" || req.user.role === "Manager") {
                 console.log("Admin/Manager: Acessando todos os candidatos inativos.");
-                // Mantemos a query sem restrições adicionais
-            } 
-            // Se for Recrutador, Employee ou Consultor, só pode ver os seus próprios candidatos
-            else if (["Recrutador", "Employee", "Consultor"].includes(req.user.role)) {
-                console.log(`Usuário ${req.user.nome} (Recrutador/Employee/Consultor): Acessando seus próprios candidatos.`);
+            } else if (["Recrutador", "Employee", "Consultor"].includes(req.user.role)) {
+                console.log(`Usuário ${req.user.nome} pode acessar apenas seus próprios candidatos.`);
                 query["responsaveis.userId"] = req.user._id;
-            } 
-            // Se for Diretor, acessa todos os candidatos da sua equipe, departamento e agência
-            else if (req.user.role.startsWith("Diretor")) {
-                console.log(`Diretor ${req.user.nome}: Acessando todos os candidatos da equipe, departamento e agência.`);
-                query["departamento"] = req.user.departamento; // Supondo que os candidatos tenham um campo "departamento"
-            } 
-            // Se for Broker de Equipa, acessa seus candidatos e os da sua equipe
-            else if (req.user.role === "Broker de Equipa") {
-                console.log(`Broker ${req.user.nome}: Acessando todos os candidatos da sua equipe.`);
-                query["responsaveis.userId"] = { $in: [req.user._id, ...(req.user.equipe || [])] }; 
-                // Supondo que `req.user.equipe` contenha os IDs dos membros da equipe
-            } 
-            else {
-                console.log(`Usuário ${req.user.nome} não tem permissão para acessar candidatos inativos.`);
+            } else if (req.user.role.startsWith("Diretor")) {
+                console.log(`Diretor ${req.user.nome}: Acessando todos do departamento.`);
+                query["departamento"] = req.user.departamento;
+            } else if (req.user.role === "Broker de Equipa") {
+                console.log(`Broker ${req.user.nome}: Acessando todos os da sua equipe.`);
+                query["responsaveis.userId"] = { $in: [req.user._id, ...(req.user.equipe || [])] };
+            } else {
                 return res.status(403).json({ error: "Acesso negado" });
             }
     
-            // Buscar os candidatos inativos com base na query montada
+            // Buscar no MongoDB
             const candidates = await Contact.find(query)
                 .populate("responsaveis.userId", "nome email")
                 .sort({ updatedAt: -1 });
@@ -713,6 +737,7 @@ const CandidateController = {
             res.status(500).json({ error: error.message });
         }
     },
+          
 
     reactivateCandidate: async (req, res) => {
         const candidateId = req.params.id;
