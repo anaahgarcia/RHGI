@@ -1,37 +1,37 @@
-# CRM da área de RH - GI - Backend
-Este repositório contém o backend do CRM da área de Recursos Humanos do Grupo Invictus, desenvolvido com foco em automação, organização e escalabilidade dos processos internos de RH.
+# RHGI-Backend
+This repository contains the backend of the HR CRM System for Grupo Invictus, developed to support and scale internal human resources operations.
 
-🔍 Sobre o Projeto
-O RHGI (Recursos Humanos Grupo Invictus) é um sistema interno criado para facilitar a gestão de recrutamento, onboarding, e acompanhamento de performance dos colaboradores. O objetivo é modernizar a operação de RH através de um sistema centralizado, flexível e adaptado às necessidades da empresa.
+🔍 Project Overview
+RHGI (Recursos Humanos Grupo Invictus) is an internal CRM platform designed to streamline recruitment, onboarding, and employee performance management. The project aims to modernize HR processes through a centralized and flexible system tailored to the organization’s operational needs.
 
-⚙️ Funcionalidades
-Registro e gerenciamento de candidatos
+⚙️ Key Features
+Candidate registration and tracking
 
-Pipeline de recrutamento com status customizáveis
+Recruitment pipeline with customizable stages
 
-Integração com sistemas externos via API
+API integration with third-party systems
 
-Autenticação e autorização de usuários
+Secure user authentication and role-based authorization
 
-Controle de permissões por perfil de acesso
+Permission control by user roles
 
-Logs de atividade para auditoria interna
+Activity logging for internal audit purposes
 
-🛠️ Tecnologias Utilizadas
-Node.js – API RESTful robusta e escalável
+🛠️ Tech Stack
+Node.js – Scalable RESTful API
 
-Express.js – Framework minimalista para rotas e middlewares
+Express.js – Lightweight web framework for routing and middleware
 
-MongoDB / PostgreSQL (dependendo do ambiente) – Armazenamento de dados estruturados
+MongoDB / PostgreSQL (depending on the environment) – Structured data storage
 
-JWT – Autenticação baseada em token
+JWT – Token-based authentication
 
-Git – Controle de versão
+Git – Version control
 
-Docker (opcional) – Containerização do ambiente de desenvolvimento
+Docker (optional) – Containerized development environment
 
-🚧 Status
-O projeto está em desenvolvimento ativo e sendo validado junto à equipe de RH e stakeholders da empresa.
+🚧 Project Status
+The system is under active development and currently being validated with the HR team and company stakeholders.
 
-👩‍💻 Desenvolvido por
+👩‍💻 Developed by
 Ana Carolina Garcia
